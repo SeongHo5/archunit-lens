@@ -2,6 +2,7 @@ package io.github.archunitlens.rules
 
 import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.psi.PsiJavaFile
@@ -31,14 +32,32 @@ class ArchRuleProjectService(private val project: Project) {
     }
 
     private fun collectRules(): List<LiveArchRule> {
+        val startedAt = System.nanoTime()
         val psiManager = PsiManager.getInstance(project)
         val projectFileIndex = ProjectFileIndex.getInstance(project)
-        return FileTypeIndex.getFiles(JavaFileType.INSTANCE, GlobalSearchScope.projectScope(project))
+        var javaFileCount = 0
+        var ruleSourceCount = 0
+        val rules = FileTypeIndex.getFiles(JavaFileType.INSTANCE, GlobalSearchScope.projectScope(project))
             .asSequence()
             .filter { !projectFileIndex.isInLibrary(it) }
             .mapNotNull { psiManager.findFile(it) as? PsiJavaFile }
-            .flatMap { ArchRuleSourceFinder.findInFile(it).asSequence() }
+            .onEach { javaFileCount++ }
+            .flatMap { file ->
+                ArchRuleSourceFinder.findInFile(file)
+                    .also { ruleSourceCount += it.size }
+                    .asSequence()
+            }
             .mapNotNull(ArchRuleParser::parse)
             .toList()
+        val durationMs = (System.nanoTime() - startedAt) / NANOS_PER_MILLISECOND
+        LOG.info(
+            "ArchUnit Lens scan completed: javaFiles=$javaFileCount, " +
+                "archRuleSources=$ruleSourceCount, supportedRules=${rules.size}, durationMs=$durationMs",
+        )
+        return rules
     }
 }
+
+private val LOG = Logger.getInstance(ArchRuleProjectService::class.java)
+
+private const val NANOS_PER_MILLISECOND = 1_000_000
