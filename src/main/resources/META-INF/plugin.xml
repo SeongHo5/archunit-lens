@@ -1,0 +1,23 @@
+<idea-plugin>
+    <id>io.github.archunitlens</id>
+    <name>ArchUnit Lens</name>
+    <vendor>ArchUnit Lens Contributors</vendor>
+    <description><![CDATA[
+        <p><b>ArchUnit Lens</b> shows supported ArchUnit rule violations as IntelliJ IDEA inspections while coding.</p>
+        <p>ArchUnit tests remain the source of truth; this plugin provides early IDE feedback for a conservative subset of static Java DSL rule patterns.</p>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <localInspection
+                language="JAVA"
+                shortName="ArchUnitLens"
+                displayName="ArchUnit Lens"
+                groupName="Architecture"
+                enabledByDefault="true"
+                level="WARNING"
+                implementationClass="io.github.archunitlens.inspections.ArchUnitLensInspection"/>
+    </extensions>
+</idea-plugin>
