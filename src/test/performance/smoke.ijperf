@@ -1,0 +1,5 @@
+%%project smoke-java-project
+%%assertTimeout 180s
+%waitForSmart
+%runClassInPlugin io.github.archunitlens io.github.archunitlens.performance.PerformanceSmokeMetrics report
+%exitApp

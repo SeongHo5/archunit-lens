@@ -1,0 +1,18 @@
+<html lang="en">
+<body>
+<p>
+Reports violations for the conservative ArchUnit rule subset that ArchUnit Lens can statically interpret.
+ArchUnit tests remain the final authority; this inspection is early editor feedback only.
+</p>
+<p>
+The canonical support contract lives in <code>docs/rule-support-matrix.md</code>. Current live-warning
+families include package dependency bans for explicit imports and resolved Java references, class suffix rules, forbidden annotations,
+annotation exclusivity, QueryMapper-style interface rules, and literal class/method meta-annotation rules.
+</p>
+<p>
+Unsupported, custom, or ambiguous helper-based rules are retained as Rule Overview metadata when possible
+but do not produce warnings. Open the ArchUnit Lens tool window to review supported and unsupported
+discovered rules, scopes, reasons, unsupported reasons, and scan metrics.
+</p>
+</body>
+</html>
