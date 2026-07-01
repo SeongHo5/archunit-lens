@@ -5,6 +5,20 @@
 
 **See supported ArchUnit violations while coding.** ArchUnit Lens is an IntelliJ IDEA plugin that turns a conservative Java ArchUnit rule subset into live editor inspections. It gives early feedback, but ArchUnit tests remain the source of truth.
 
+## Installation
+
+Install the plugin from JetBrains Marketplace:
+
+[Install Plugin](https://plugins.jetbrains.com/plugin/32603)
+
+Or install it from your IDE:
+
+1. Open **Settings / Preferences**
+2. Go to **Plugins**
+3. Open the **Marketplace** tab
+4. Search for **ArchUnit Lens**
+5. Click **Install**
+
 ## First five minutes
 
 1. Install the plugin or run it with `runIde`.

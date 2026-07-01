@@ -5,6 +5,20 @@
 
 **ArchUnit 규칙 위반을 코딩 중 IDE에서 먼저 확인합니다.** ArchUnit Lens는 보수적으로 정적 해석 가능한 Java ArchUnit rule subset을 IntelliJ IDEA live inspection으로 보여주는 플러그인입니다. 빠른 피드백을 제공하지만 최종 기준은 계속 ArchUnit 테스트입니다.
 
+## 설치
+
+JetBrains Marketplace에서 플러그인을 설치합니다.
+
+[플러그인 설치](https://plugins.jetbrains.com/plugin/32603)
+
+또는 IDE에서 직접 설치합니다.
+
+1. **Settings / Preferences**를 엽니다.
+2. **Plugins**로 이동합니다.
+3. **Marketplace** 탭을 엽니다.
+4. **ArchUnit Lens**를 검색합니다.
+5. **Install**을 클릭합니다.
+
 ## 처음 5분 흐름
 
 1. IntelliJ IDEA에서 플러그인을 설치하거나 `runIde`로 실행합니다.
