@@ -1,36 +1,50 @@
-# Repository Guidelines
+# Codex Entry Point
 
-## Project Structure & Module Organization
-ArchUnit Lens is a Kotlin IntelliJ IDEA plugin. Production code lives in `src/main/kotlin/io/github/archunitlens`, split into plugin entry points, `inspections/`, `inspections/quickfix/`, and `rules/`. Plugin descriptors and UI text live in `src/main/resources`, especially `META-INF/plugin.xml`, `inspectionDescriptions/`, and `messages/`. Tests mirror the package structure under `src/test/kotlin`; fixtures belong in `src/test/testData`. Planning notes are in `docs/`; CI and release automation are in `.github/workflows/`.
+This file is the compact Codex/root adapter for this repository. Keep detailed local rules in `.codex/rules/`, not here.
 
-## Build, Test, and Development Commands
-Use the Gradle wrapper from the repository root.
+## Read Order
 
-```powershell
-$env:JAVA_HOME='C:\Program Files\Java\jdk-17'
-.\gradlew.bat test          # run Kotlin/JUnit and IntelliJ Platform tests
-.\gradlew.bat ktlintCheck   # verify Kotlin formatting
-.\gradlew.bat ktlintFormat  # apply ktlint formatting
-.\gradlew.bat check         # run full verification used by CI tests
-.\gradlew.bat buildPlugin   # create build/distributions plugin ZIP
-.\gradlew.bat verifyPlugin  # run IntelliJ Plugin Verifier tasks
-.\gradlew.bat unpackArchUnitReferenceSources # unpack local ArchUnit DSL source reference under build/
-```
+1. Read this file for repository-level instructions.
+2. Before repository changes, read the applicable files in `.codex/rules/`.
+3. Use the Local Rule Gate to choose rule files.
 
-CI uses JDK 21, but README recommends JDK 17 for local IntelliJ Platform tests.
+## Local Rule Gate
 
-## Coding Style & Naming Conventions
-Write Kotlin with four-space indentation and idiomatic IntelliJ Platform APIs. Keep files/classes in PascalCase (`ArchRuleParser.kt`) and packages lowercase under `io.github.archunitlens`. Tests end in `Test`. Use KDoc for public plugin classes, services, rule models, and quick fixes so open-source readers can understand intent without tracing all PSI code. Keep parser/rule models in `rules/`; diagnostics and quick fixes in `inspections/`. Avoid new external dependencies unless explicitly approved.
+### MUST
 
-## IntelliJ Plugin Implementation Rules
-Anything registered in `plugin.xml` must be implemented as a Kotlin `class`, not `object`; the platform owns extension lifecycle and instantiation. In extension classes, `companion object` may contain only simple constants or a logger. Move other state, caches, Regex/TokenSet, factories, or heavy helpers to top-level declarations, services, or non-registered utility objects. Current utility `object`s are acceptable only while they are not registered as plugin extensions.
+- Treat applicable `.codex/rules/*` files as a pre-edit gate.
+- Re-run the local rule gate after compaction, handoff, session restart, or continuing work from another agent's summary.
+- Verify rule conformance explicitly before a final report or commit.
+- Compare `git status`, staged files, and commit contents against the requested scope before reporting or committing.
 
-## Testing Guidelines
-The suite uses JUnit 4 and IntelliJ Platform test fixtures. Add parser/package tests for rule interpretation changes and inspection fixture tests for editor behavior. Put Java fixture inputs in `src/test/testData`; name scenarios after the rule or quick fix. Run `test` before small changes and `check` before PRs.
+### MUST NOT
 
-## Commit & Pull Request Guidelines
-Use short, descriptive, outcome-focused subjects like `Init ArchUnit Lens project`. PRs should describe behavior, list verification commands, link issues, and include screenshots/GIFs only for UI-visible changes.
+- Do not treat autonomy, workflow, summary, or orchestration instructions as a replacement for `.codex/rules/*`.
+- Do not assume a previous agent or earlier session already read the applicable local rules.
+- Do not include unrelated working-tree changes in a report or commit because they were present during the task.
+- Do not duplicate full local rule bodies into `AGENTS.md`; route to `.codex/rules/*`.
 
-## Architecture & Scope Notes
-ArchUnit tests remain the source of truth. The plugin statically recognizes a conservative Java ArchUnit subset and must not execute ArchUnit or partially support unsupported DSL chains without tests.
-Use `archUnit.reference.version` and `unpackArchUnitReferenceSources` for local ArchUnit source inspection; this reference source must stay off plugin compile/runtime classpaths.
+### CONDITIONAL
+
+IF changing repository files:
+
+- Read `.codex/rules/project-structure.md`.
+- Read `.codex/rules/build-and-verification.md`.
+
+IF editing Kotlin production code, plugin resources, inspections, quick fixes, or rule models:
+
+- Read `.codex/rules/kotlin-style.md`.
+- Read `.codex/rules/intellij-plugin-contract.md`.
+- Read `.codex/rules/archunit-support-scope.md` when touching ArchUnit rule parsing or support behavior.
+
+IF editing tests or fixtures:
+
+- Read `.codex/rules/testing.md`.
+
+IF editing repository rules, agent instructions, or rule-governed docs:
+
+- Read `.codex/rules/rule-authoring.md`.
+
+IF preparing a final report, commit, or pull request:
+
+- Read `.codex/rules/git-and-review-scope.md`.

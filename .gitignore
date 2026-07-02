@@ -18,6 +18,9 @@ out/
 !**/src/main/**/out/
 !**/src/test/**/out/
 
+### Codex ###
+AGENTS.override.md
+
 ### Misc ###
 .DS_Store
 ._.DS_Store
