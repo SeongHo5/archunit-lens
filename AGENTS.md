@@ -37,6 +37,15 @@ IF editing Kotlin production code, plugin resources, inspections, quick fixes, o
 - Read `.codex/rules/intellij-plugin-contract.md`.
 - Read `.codex/rules/archunit-support-scope.md` when touching ArchUnit rule parsing or support behavior.
 
+IF adding a feature, refactoring plugin runtime behavior, changing inspections, quick fixes, tool windows, settings, caches, parser support, or touching `plugin.xml`:
+
+- Run the `intellij-platform-auditor` agent before final report.
+- Treat a `BLOCK` verdict as a failed gate.
+
+IF changing only docs, rules, comments, or non-runtime metadata:
+
+- Skip `intellij-platform-auditor` unless IntelliJ runtime behavior changes.
+
 IF editing tests or fixtures:
 
 - Read `.codex/rules/testing.md`.
