@@ -19,4 +19,3 @@ Initial public release.
 
 - ArchUnit Lens never executes ArchUnit rules, helper methods, lambdas, `DescribedPredicate`, `ArchCondition`, or project code.
 - Method-style `@ArchTest` rules, Kotlin rule parsing, Kotlin target inspection, unresolved references, and arbitrary boolean/member DSL chains do not produce live warnings.
-- Marketplace screenshots/GIFs still need to be captured before public listing polish.
