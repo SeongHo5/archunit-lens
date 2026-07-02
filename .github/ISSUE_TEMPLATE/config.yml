@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: ArchUnit Lens documentation
+    url: https://github.com/SeongHo5/archunit-lens#readme
+    about: Check the README for supported static ArchUnit rule coverage and project scope.
