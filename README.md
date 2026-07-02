@@ -1,6 +1,8 @@
 # ArchUnit Lens
 
-[![CI](https://github.com/archunit-lens/archunit-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/archunit-lens/archunit-lens/actions/workflows/ci.yml)
+[![CI](https://github.com/SeongHo5/archunit-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/SeongHo5/archunit-lens/actions/workflows/ci.yml)
+[![Plugin Verification](https://github.com/SeongHo5/archunit-lens/actions/workflows/plugin-verification.yml/badge.svg)](https://github.com/SeongHo5/archunit-lens/actions/workflows/plugin-verification.yml)
+
 [한국어](README.ko.md)
 
 **See supported ArchUnit violations while coding.** ArchUnit Lens is an IntelliJ IDEA plugin that turns a conservative Java ArchUnit rule subset into live editor inspections. It gives early feedback, but ArchUnit tests remain the source of truth.

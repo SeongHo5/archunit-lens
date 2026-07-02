@@ -1,6 +1,8 @@
 # ArchUnit Lens
 
-[![CI](https://github.com/archunit-lens/archunit-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/archunit-lens/archunit-lens/actions/workflows/ci.yml)
+[![CI](https://github.com/SeongHo5/archunit-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/SeongHo5/archunit-lens/actions/workflows/ci.yml)
+[![Plugin Verification](https://github.com/SeongHo5/archunit-lens/actions/workflows/plugin-verification.yml/badge.svg)](https://github.com/SeongHo5/archunit-lens/actions/workflows/plugin-verification.yml)
+
 [English](README.md)
 
 **ArchUnit 규칙 위반을 코딩 중 IDE에서 먼저 확인합니다.** ArchUnit Lens는 보수적으로 정적 해석 가능한 Java ArchUnit rule subset을 IntelliJ IDEA live inspection으로 보여주는 플러그인입니다. 빠른 피드백을 제공하지만 최종 기준은 계속 ArchUnit 테스트입니다.
