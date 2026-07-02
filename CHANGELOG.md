@@ -1,5 +1,13 @@
 # ArchUnit Lens Changelog
 
+## [0.1.1] - 2026-07-03
+
+Patch release focused on Rule Overview refresh stability.
+
+### Fixed
+
+- Prevented Rule Overview refresh from reading PSI outside IntelliJ read actions.
+
 ## [0.1.0] - 2026-07-01
 
 Initial public release.
