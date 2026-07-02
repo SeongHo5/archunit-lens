@@ -252,7 +252,10 @@ private fun packageNameForJavaFile(
     project: Project,
     selectedFile: VirtualFile?,
 ): String? {
-    val psiFile = selectedFile?.let { PsiManager.getInstance(project).findFile(it) } as? PsiJavaFile ?: return null
+    if (project.isDisposed || selectedFile?.isValid != true) {
+        return null
+    }
+    val psiFile = selectedFile.let { PsiManager.getInstance(project).findFile(it) } as? PsiJavaFile ?: return null
     return psiFile.packageName
 }
 
