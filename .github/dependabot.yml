@@ -12,6 +12,8 @@ updates:
       time: "09:00"
       timezone: "Asia/Seoul"
     open-pull-requests-limit: 5
+    labels:
+      - "type: dependency"
 
   # Maintain dependencies for GitHub Actions
   - package-ecosystem: "github-actions"
@@ -22,3 +24,5 @@ updates:
       time: "09:00"
       timezone: "Asia/Seoul"
     open-pull-requests-limit: 3
+    labels:
+      - "type: dependency"
