@@ -1,9 +1,14 @@
 package io.github.archunitlens.ui
 
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.psi.PsiJavaFile
@@ -12,6 +17,7 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
+import com.intellij.util.concurrency.AppExecutorUtil
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.DiscoveredArchRule
@@ -26,6 +32,7 @@ import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JSplitPane
 import javax.swing.ListSelectionModel
+import javax.swing.Timer
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
@@ -74,6 +81,11 @@ private class ArchUnitLensRuleOverviewPanel(
         lineWrap = false
         text = ArchUnitLensBundle.message("toolwindow.loading")
     }
+    private val refreshCoalesceKey = Any()
+    private val refreshDebounceTimer = Timer(REFRESH_DEBOUNCE_MILLIS) { runRefresh(refreshGeneration) }.apply {
+        isRepeats = false
+    }
+    private var refreshGeneration = 0
     private var latestOverviewText: String = ArchUnitLensBundle.message("toolwindow.loading")
     private var latestCurrentPackage: String? = null
 
@@ -100,9 +112,9 @@ private class ArchUnitLensRuleOverviewPanel(
         }
         currentFileOnly.addActionListener { refresh() }
         searchField.document.addDocumentListener(object : DocumentListener {
-            override fun insertUpdate(event: DocumentEvent) = refresh()
-            override fun removeUpdate(event: DocumentEvent) = refresh()
-            override fun changedUpdate(event: DocumentEvent) = refresh()
+            override fun insertUpdate(event: DocumentEvent) = scheduleRefresh()
+            override fun removeUpdate(event: DocumentEvent) = scheduleRefresh()
+            override fun changedUpdate(event: DocumentEvent) = scheduleRefresh()
         })
         ruleList.addListSelectionListener { updateDetails() }
         refresh()
@@ -120,23 +132,39 @@ private class ArchUnitLensRuleOverviewPanel(
         add(copyDiagnosticsButton)
     }
 
-    private fun refresh() {
-        val service = project.service<ArchRuleProjectService>()
-        latestCurrentPackage = currentJavaPackage()
-        val discoveries = if (currentFileOnly.isSelected && latestCurrentPackage != null) {
-            service.discoveriesForPackage(latestCurrentPackage.orEmpty())
+    private fun refresh() = scheduleRefresh(immediate = true)
+
+    private fun scheduleRefresh(immediate: Boolean = false) {
+        refreshGeneration++
+        if (immediate) {
+            refreshDebounceTimer.stop()
+            runRefresh(refreshGeneration)
         } else {
-            service.discoveries()
+            refreshDebounceTimer.restart()
         }
-        val filter = currentFilter()
-        val visibleDiscoveries = ArchUnitLensRuleOverviewFormatter.filteredDiscoveries(discoveries, filter)
-        latestOverviewText = ArchUnitLensRuleOverviewFormatter.render(
-            discoveries = discoveries,
-            metrics = service.scanMetrics(),
-            filter = filter,
-        )
+    }
+
+    private fun runRefresh(generation: Int) {
+        val request = currentRefreshRequest()
+        ReadAction.nonBlocking<RuleOverviewSnapshot> {
+            readRuleOverviewSnapshot(request)
+        }
+            .inSmartMode(project)
+            .expireWith(project)
+            .coalesceBy(refreshCoalesceKey)
+            .finishOnUiThread(ModalityState.defaultModalityState()) { snapshot ->
+                if (generation == refreshGeneration) {
+                    applySnapshot(snapshot)
+                }
+            }
+            .submit(AppExecutorUtil.getAppExecutorService())
+    }
+
+    private fun applySnapshot(snapshot: RuleOverviewSnapshot) {
+        latestCurrentPackage = snapshot.currentPackage
+        latestOverviewText = snapshot.overviewText
         listModel.clear()
-        visibleDiscoveries.forEach { listModel.addElement(RuleOverviewRow(it)) }
+        snapshot.visibleDiscoveries.forEach { listModel.addElement(RuleOverviewRow(it)) }
         if (listModel.isEmpty) {
             details.text = latestOverviewText
             openSourceButton.isEnabled = false
@@ -151,19 +179,41 @@ private class ArchUnitLensRuleOverviewPanel(
     private fun updateDetails() {
         val row = ruleList.selectedValue
         openSourceButton.isEnabled = row != null
-        details.text = row?.let {
-            ArchUnitLensRuleOverviewFormatter.renderDetails(it.discovery, latestCurrentPackage)
-        } ?: latestOverviewText
+        details.text = readAction {
+            row?.let {
+                ArchUnitLensRuleOverviewFormatter.renderDetails(it.discovery, latestCurrentPackage)
+            } ?: latestOverviewText
+        }
         details.caretPosition = 0
     }
 
-    private fun currentFilter(): RuleOverviewFilter = RuleOverviewFilter(
+    private fun readRuleOverviewSnapshot(request: RuleOverviewRefreshRequest): RuleOverviewSnapshot {
+        val service = project.service<ArchRuleProjectService>()
+        val currentPackage = packageNameForJavaFile(project, request.selectedFile)
+        val filter = request.toFilter(currentPackage)
+        val discoveries = if (request.currentFileOnly && currentPackage != null) {
+            service.discoveriesForPackage(currentPackage)
+        } else {
+            service.discoveries()
+        }
+        return RuleOverviewSnapshot(
+            currentPackage = currentPackage,
+            visibleDiscoveries = ArchUnitLensRuleOverviewFormatter.filteredDiscoveries(discoveries, filter),
+            overviewText = ArchUnitLensRuleOverviewFormatter.render(
+                discoveries = discoveries,
+                metrics = service.scanMetrics(),
+                filter = filter,
+            ),
+        )
+    }
+
+    private fun currentRefreshRequest(): RuleOverviewRefreshRequest = RuleOverviewRefreshRequest(
         showSupported = showSupported.isSelected,
         showUnsupported = showUnsupported.isSelected,
         searchQuery = searchField.text,
-        currentPackage = latestCurrentPackage,
-        currentPackageOnly = currentFileOnly.isSelected,
+        currentFileOnly = currentFileOnly.isSelected,
         showDiagnostics = showDiagnostics.isSelected,
+        selectedFile = FileEditorManager.getInstance(project).selectedFiles.firstOrNull(),
     )
 
     private fun resetFiltersFromSettings() {
@@ -180,22 +230,59 @@ private class ArchUnitLensRuleOverviewPanel(
         state.showDiagnosticsInOverview = showDiagnostics.isSelected
     }
 
-    private fun currentJavaPackage(): String? {
-        val selectedFile = FileEditorManager.getInstance(project).selectedFiles.firstOrNull() ?: return null
-        val psiFile = PsiManager.getInstance(project).findFile(selectedFile) as? PsiJavaFile ?: return null
-        return psiFile.packageName
-    }
-
     private fun openSelectedRuleSource() {
-        val element = ruleList.selectedValue?.discovery?.descriptor?.sourcePointer?.element ?: return
-        val virtualFile = element.containingFile?.virtualFile ?: return
-        com.intellij.openapi.fileEditor.OpenFileDescriptor(project, virtualFile, element.textOffset).navigate(true)
+        val descriptor = readAction {
+            val element = ruleList.selectedValue?.discovery?.descriptor?.sourcePointer?.element ?: return@readAction null
+            val virtualFile = element.containingFile?.virtualFile ?: return@readAction null
+            OpenFileDescriptor(project, virtualFile, element.textOffset)
+        } ?: return
+        descriptor.navigate(true)
     }
 
     private fun copyOverviewDiagnostics() {
         CopyPasteManager.getInstance().setContents(StringSelection(latestOverviewText))
     }
 }
+
+internal fun currentJavaPackage(project: Project): String? = readAction {
+    packageNameForJavaFile(project, FileEditorManager.getInstance(project).selectedFiles.firstOrNull())
+}
+
+private fun packageNameForJavaFile(
+    project: Project,
+    selectedFile: VirtualFile?,
+): String? {
+    val psiFile = selectedFile?.let { PsiManager.getInstance(project).findFile(it) } as? PsiJavaFile ?: return null
+    return psiFile.packageName
+}
+
+private fun <T> readAction(action: () -> T): T = ApplicationManager.getApplication().runReadAction<T>(action)
+
+private const val REFRESH_DEBOUNCE_MILLIS = 250
+
+private data class RuleOverviewRefreshRequest(
+    val showSupported: Boolean,
+    val showUnsupported: Boolean,
+    val searchQuery: String,
+    val currentFileOnly: Boolean,
+    val showDiagnostics: Boolean,
+    val selectedFile: VirtualFile?,
+) {
+    fun toFilter(currentPackage: String?): RuleOverviewFilter = RuleOverviewFilter(
+        showSupported = showSupported,
+        showUnsupported = showUnsupported,
+        searchQuery = searchQuery,
+        currentPackage = currentPackage,
+        currentPackageOnly = currentFileOnly,
+        showDiagnostics = showDiagnostics,
+    )
+}
+
+private data class RuleOverviewSnapshot(
+    val currentPackage: String?,
+    val visibleDiscoveries: List<DiscoveredArchRule>,
+    val overviewText: String,
+)
 
 private data class RuleOverviewRow(
     val discovery: DiscoveredArchRule,
