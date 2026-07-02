@@ -13,6 +13,10 @@ plugins {
 
 group = "io.github.archunitlens"
 
+kotlin {
+    jvmToolchain(21)
+}
+
 val archUnitReferenceVersion = providers.gradleProperty("archUnit.reference.version")
 val archUnitReferenceSources by configurations.creating {
     description = "ArchUnit source JAR for local DSL reference only; not used on plugin compile/runtime classpaths."

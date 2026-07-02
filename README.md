@@ -86,23 +86,21 @@ Use **Settings | Tools | ArchUnit Lens** for per-rule-family enable/disable, ove
 ## Compatibility and local development
 
 - Plugin version: `0.1.0`
-- Local IntelliJ Platform tests: use JDK 17.
-- GitHub Actions CI: uses JDK 21.
+- Gradle toolchain and GitHub Actions CI: use JDK 21.
 - ArchUnit reference sources are pinned by `archUnit.reference.version` in `gradle.properties` and unpacked only for local DSL analysis; ArchUnit is not on the plugin compile/runtime classpath.
 
-```powershell
-$env:JAVA_HOME='C:\Program Files\Java\jdk-17'
-.\gradlew.bat runIde
+```sh
+./gradlew runIde
 ```
 
 Verification commands:
 
-```powershell
-.\gradlew.bat ktlintCheck
-.\gradlew.bat test
-.\gradlew.bat check
-.\gradlew.bat buildPlugin
-.\gradlew.bat verifyPlugin
+```sh
+./gradlew ktlintCheck
+./gradlew test
+./gradlew check
+./gradlew buildPlugin
+./gradlew verifyPlugin
 ```
 
 For contribution rules and fixture conventions, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
