@@ -22,11 +22,19 @@ internal data class RuleOverviewFilter(
 )
 
 /**
+ * UI-ready rule overview row data resolved under the caller's read-action boundary.
+ */
+internal data class RuleOverviewItem(
+    val discovery: DiscoveredArchRule,
+    val sourceFileName: String?,
+)
+
+/**
  * Builds the textual rule overview shown in the ArchUnit Lens tool window.
  */
 internal object ArchUnitLensRuleOverviewFormatter {
     fun render(
-        discoveries: List<DiscoveredArchRule>,
+        discoveries: List<RuleOverviewItem>,
         metrics: ArchRuleScanMetrics,
         filter: RuleOverviewFilter = RuleOverviewFilter(),
     ): String = buildString {
@@ -66,33 +74,33 @@ internal object ArchUnitLensRuleOverviewFormatter {
         }
 
         visibleDiscoveries
-            .groupBy { it.groupLabel() }
+            .groupBy { it.discovery.groupLabel() }
             .forEach { (group, groupDiscoveries) ->
                 appendLine(group)
-                groupDiscoveries.forEachIndexed { index, discovery ->
-                    append(renderRule(discovery, index + 1, filter.showDiagnostics))
+                groupDiscoveries.forEachIndexed { index, item ->
+                    append(renderRule(item, index + 1, filter.showDiagnostics))
                 }
             }
     }
 
     fun filteredDiscoveries(
-        discoveries: List<DiscoveredArchRule>,
+        discoveries: List<RuleOverviewItem>,
         filter: RuleOverviewFilter,
-    ): List<DiscoveredArchRule> = discoveries
-        .filter { filter.showSupported || it.liveRule == null }
-        .filter { filter.showUnsupported || it.liveRule != null }
-        .filter { it.matchesSearch(filter.searchQuery) }
+    ): List<RuleOverviewItem> = discoveries
+        .filter { filter.showSupported || it.discovery.liveRule == null }
+        .filter { filter.showUnsupported || it.discovery.liveRule != null }
+        .filter { it.discovery.matchesSearch(filter.searchQuery) }
         .sortedWith(
-            compareBy<DiscoveredArchRule> { it.liveRule == null }
-                .thenBy { it.descriptor.subject.label() }
-                .thenBy { it.ruleName },
+            compareBy<RuleOverviewItem> { it.discovery.liveRule == null }
+                .thenBy { it.discovery.descriptor.subject.label() }
+                .thenBy { it.discovery.ruleName },
         )
 
     fun renderDetails(
-        discovery: DiscoveredArchRule,
+        item: RuleOverviewItem,
         currentPackage: String?,
     ): String = buildString {
-        append(renderRule(discovery, index = 1, includeDiagnostic = true))
+        append(renderRule(item, index = 1, includeDiagnostic = true))
         appendLine(
             currentPackage?.let { ArchUnitLensBundle.message("overview.currentPackage", it) }
                 ?: ArchUnitLensBundle.message("overview.currentPackage.none"),
@@ -116,10 +124,11 @@ internal object ArchUnitLensRuleOverviewFormatter {
     }
 
     private fun renderRule(
-        discovery: DiscoveredArchRule,
+        item: RuleOverviewItem,
         index: Int,
         includeDiagnostic: Boolean,
     ): String = buildString {
+        val discovery = item.discovery
         val descriptor = discovery.descriptor
         appendLine(ArchUnitLensBundle.message("overview.rule.index", index, discovery.ruleName))
         appendLine(indented("overview.status", descriptor.supportStatus.label()))
@@ -128,7 +137,7 @@ internal object ArchUnitLensRuleOverviewFormatter {
         appendLine(indented("overview.predicate", descriptor.predicate))
         appendLine(indented("overview.condition", descriptor.condition))
         descriptor.reason?.let { appendLine(indented("overview.reason", it)) }
-        appendLine(indented("overview.source", descriptor.sourcePointer.element?.containingFile?.name ?: discovery.ruleName))
+        appendLine(indented("overview.source", item.sourceFileName ?: discovery.ruleName))
         if (includeDiagnostic) {
             appendLine(indented("overview.diagnostic", discovery.diagnostic()))
         }
