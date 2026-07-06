@@ -4,6 +4,7 @@ import com.intellij.openapi.components.service
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.ArchRuleProjectService
+import io.github.archunitlens.rules.DiscoveredArchRule
 
 class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
     fun testFormatsSupportedAndUnsupportedDiscoveriesWithScanMetrics() {
@@ -40,13 +41,14 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
 
         val service = project.service<ArchRuleProjectService>()
         val output = ArchUnitLensRuleOverviewFormatter.render(
-            discoveries = service.discoveries(),
+            discoveries = service.discoveries().toOverviewItems("ArchitectureRules.java"),
             metrics = service.scanMetrics(),
         )
 
         assertTrue(output.contains(ArchUnitLensBundle.message("overview.title")))
         assertTrue(output.contains(scanLabelPrefix()))
         assertTrue(output.contains("services_should_end_with_service"))
+        assertTrue(output.contains(ArchUnitLensBundle.message("overview.source", "ArchitectureRules.java")))
         assertTrue(output.contains(statusLine(ArchUnitLensBundle.message("overview.status.supported"))))
         assertTrue(output.contains(ArchUnitLensBundle.message("overview.reason", "Services stay explicit.")))
         assertTrue(output.contains("multi_package_dependency_shape"))
@@ -96,7 +98,7 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         val service = project.service<ArchRuleProjectService>()
         val discoveries = service.discoveries()
         val output = ArchUnitLensRuleOverviewFormatter.render(
-            discoveries = discoveries,
+            discoveries = discoveries.toOverviewItems("ArchitectureRules.java"),
             metrics = service.scanMetrics(),
             filter = RuleOverviewFilter(
                 showSupported = false,
@@ -113,6 +115,10 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
     }
 
     private fun statusLine(status: String): String = ArchUnitLensBundle.message("overview.status", status)
+
+    private fun List<DiscoveredArchRule>.toOverviewItems(
+        sourceFileName: String?,
+    ): List<RuleOverviewItem> = map { RuleOverviewItem(it, sourceFileName) }
 
     private fun scanLabelPrefix(): String = ArchUnitLensBundle
         .message("overview.scan", "", "", "", "", "", "", "", "", "", "", "")

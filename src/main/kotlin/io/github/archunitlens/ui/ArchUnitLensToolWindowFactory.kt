@@ -179,11 +179,9 @@ private class ArchUnitLensRuleOverviewPanel(
     private fun updateDetails() {
         val row = ruleList.selectedValue
         openSourceButton.isEnabled = row != null
-        details.text = readAction {
-            row?.let {
-                ArchUnitLensRuleOverviewFormatter.renderDetails(it.discovery, latestCurrentPackage)
-            } ?: latestOverviewText
-        }
+        details.text = row?.let {
+            ArchUnitLensRuleOverviewFormatter.renderDetails(it.item, latestCurrentPackage)
+        } ?: latestOverviewText
         details.caretPosition = 0
     }
 
@@ -195,7 +193,7 @@ private class ArchUnitLensRuleOverviewPanel(
             service.discoveriesForPackage(currentPackage)
         } else {
             service.discoveries()
-        }
+        }.map { it.toOverviewItem() }
         return RuleOverviewSnapshot(
             currentPackage = currentPackage,
             visibleDiscoveries = ArchUnitLensRuleOverviewFormatter.filteredDiscoveries(discoveries, filter),
@@ -232,7 +230,7 @@ private class ArchUnitLensRuleOverviewPanel(
 
     private fun openSelectedRuleSource() {
         val descriptor = readAction {
-            val element = ruleList.selectedValue?.discovery?.descriptor?.sourcePointer?.element ?: return@readAction null
+            val element = ruleList.selectedValue?.item?.discovery?.descriptor?.sourcePointer?.element ?: return@readAction null
             val virtualFile = element.containingFile?.virtualFile ?: return@readAction null
             OpenFileDescriptor(project, virtualFile, element.textOffset)
         } ?: return
@@ -283,12 +281,17 @@ private data class RuleOverviewRefreshRequest(
 
 private data class RuleOverviewSnapshot(
     val currentPackage: String?,
-    val visibleDiscoveries: List<DiscoveredArchRule>,
+    val visibleDiscoveries: List<RuleOverviewItem>,
     val overviewText: String,
 )
 
 private data class RuleOverviewRow(
-    val discovery: DiscoveredArchRule,
+    val item: RuleOverviewItem,
 ) {
-    override fun toString(): String = discovery.ruleName
+    override fun toString(): String = item.discovery.ruleName
+}
+
+private fun DiscoveredArchRule.toOverviewItem(): RuleOverviewItem {
+    val sourceFileName = descriptor.sourcePointer.element?.containingFile?.name
+    return RuleOverviewItem(this, sourceFileName)
 }
