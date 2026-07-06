@@ -1,10 +1,16 @@
 package io.github.archunitlens.inspections
 
+import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.psi.PsiElement
+import com.intellij.psi.SmartPointerManager
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
 import io.github.archunitlens.ArchUnitLensBundle
+import io.github.archunitlens.rules.AnalyzeScope
+import io.github.archunitlens.rules.ClassNameSuffixRule
+import io.github.archunitlens.rules.ForbiddenAnnotationRule
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.nio.file.Path
 
@@ -246,6 +252,10 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         val warnings = warningDescriptions()
         assertTrue(warnings.contains(problemMessage("controller_classes_should_end_with_controller")))
         assertTrue(myFixture.getAllQuickFixes().any { it.text.contains(appendControllerSuffixFixText()) })
+        assertCorrectiveFixAndNavigationAvailable(
+            appendControllerSuffixFixText(),
+            goToRuleFixText("controller_classes_should_end_with_controller"),
+        )
     }
 
     fun testClassNameSuffixIgnoresCompliantAndOutsidePackageClasses() {
@@ -320,6 +330,47 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         val warnings = warningDescriptions()
         assertTrue(warnings.contains(problemMessage("domain_should_not_be_service")))
         assertTrue(myFixture.getAllQuickFixes().any { it.text.contains(removeAnnotationFixText("Service")) })
+        assertCorrectiveFixAndNavigationAvailable(
+            removeAnnotationFixText("Service"),
+            goToRuleFixText("domain_should_not_be_service"),
+        )
+    }
+
+    fun testCorrectiveQuickFixesPrecedeLowPriorityRuleNavigation() {
+        val file = myFixture.addFileToProject(
+            "src/test/java/com/example/ArchitectureRules.java",
+            """
+                package com.example;
+
+                class ArchitectureRules {
+                }
+            """.trimIndent(),
+        )
+        val sourcePointer = SmartPointerManager.createPointer<PsiElement>(file)
+        val suffixRule = ClassNameSuffixRule(
+            ruleName = "sample_rule",
+            sourcePackagePattern = "..controller..",
+            requiredSuffix = "Controller",
+            sourcePointer = sourcePointer,
+            analyzeScope = AnalyzeScope.All,
+        )
+        val annotationRule = ForbiddenAnnotationRule(
+            ruleName = "sample_rule",
+            sourcePackagePattern = "..domain..",
+            forbiddenAnnotationQualifiedName = "org.springframework.stereotype.Service",
+            sourcePointer = sourcePointer,
+            analyzeScope = AnalyzeScope.All,
+        )
+
+        val suffixFixes = ArchUnitViolation.MissingClassNameSuffix(suffixRule, "Controller").quickFixes()
+        assertTrue(suffixFixes.first().name.contains(appendControllerSuffixFixText()))
+        assertTrue(suffixFixes.last() is LowPriorityAction)
+        assertTrue(suffixFixes.last().name.contains(goToRuleFixText("sample_rule")))
+
+        val annotationFixes = ArchUnitViolation.ForbiddenAnnotation(annotationRule, "Service").quickFixes()
+        assertTrue(annotationFixes.first().name.contains(removeAnnotationFixText("Service")))
+        assertTrue(annotationFixes.last() is LowPriorityAction)
+        assertTrue(annotationFixes.last().name.contains(goToRuleFixText("sample_rule")))
     }
 
     fun testForbiddenAnnotationQuickFixRemovesOnlyForbiddenAnnotation() {
@@ -915,4 +966,10 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         "quickfix.removeAnnotation.name",
         annotationName,
     )
+
+    private fun assertCorrectiveFixAndNavigationAvailable(correctiveText: String, navigationText: String) {
+        val fixes = myFixture.getAllQuickFixes()
+        assertTrue(fixes.any { it.text.contains(correctiveText) })
+        assertTrue(fixes.any { it.text.contains(navigationText) })
+    }
 }
