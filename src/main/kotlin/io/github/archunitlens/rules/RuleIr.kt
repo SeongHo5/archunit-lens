@@ -47,7 +47,7 @@ sealed interface SupportStatus {
  * Stable reason why a discovered rule cannot safely produce live diagnostics.
  */
 sealed interface UnsupportedReason {
-    data object ResideInAnyPackage : UnsupportedReason
+    data object UnsupportedMultiPackageRuleShape : UnsupportedReason
     data object CustomOrMetaAnnotationPredicates : UnsupportedReason
     data class UnsupportedEntryPoint(val entryPoint: String) : UnsupportedReason
     data object UnsupportedOrAmbiguousRuleChain : UnsupportedReason
