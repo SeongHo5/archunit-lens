@@ -4,6 +4,7 @@ import com.intellij.codeInsight.intention.FileModifier
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo
 import com.intellij.codeInspection.LocalQuickFix
 import com.intellij.codeInspection.ProblemDescriptor
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
@@ -27,8 +28,11 @@ class GoToArchRuleQuickFix(
     override fun getFileModifierForPreview(target: PsiFile): FileModifier? = null
 
     override fun applyFix(project: Project, descriptor: ProblemDescriptor) {
-        val element = sourcePointer.element ?: return
-        val virtualFile = element.containingFile?.virtualFile ?: return
-        OpenFileDescriptor(project, virtualFile, element.textOffset).navigate(true)
+        val navigationTarget = ApplicationManager.getApplication().runReadAction<OpenFileDescriptor?> {
+            val element = sourcePointer.element ?: return@runReadAction null
+            val virtualFile = element.containingFile?.virtualFile ?: return@runReadAction null
+            OpenFileDescriptor(project, virtualFile, element.textOffset)
+        } ?: return
+        navigationTarget.navigate(true)
     }
 }
