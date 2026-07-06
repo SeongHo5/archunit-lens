@@ -373,10 +373,10 @@ object ArchRuleParser {
     }
 
     private fun List<RawCall>.unsupportedReason(): UnsupportedReason = when {
-        any { it.name == "resideInAnyPackage" } -> UnsupportedReason.ResideInAnyPackage
         any { it.name == "notBeMetaAnnotatedWith" } -> UnsupportedReason.CustomOrMetaAnnotationPredicates
         firstOrNull()?.name !in setOf("classes", "noClasses", "theClass", "members", "fields", "codeUnits", "constructors", "methods") ->
             UnsupportedReason.UnsupportedEntryPoint(firstOrNull()?.name ?: "unknown")
+        any { it.name == "resideInAnyPackage" } -> UnsupportedReason.UnsupportedMultiPackageRuleShape
         else -> UnsupportedReason.UnsupportedOrAmbiguousRuleChain
     }
 

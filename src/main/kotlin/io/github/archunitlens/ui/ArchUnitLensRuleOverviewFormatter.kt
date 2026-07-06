@@ -213,7 +213,9 @@ internal object ArchUnitLensRuleOverviewFormatter {
     }
 
     private fun UnsupportedReason.label(): String = when (this) {
-        UnsupportedReason.ResideInAnyPackage -> ArchUnitLensBundle.message("overview.unsupported.resideInAnyPackage")
+        UnsupportedReason.UnsupportedMultiPackageRuleShape -> ArchUnitLensBundle.message(
+            "overview.unsupported.multiPackageRuleShape",
+        )
         UnsupportedReason.CustomOrMetaAnnotationPredicates -> ArchUnitLensBundle.message(
             "overview.unsupported.customOrMetaAnnotationPredicates",
         )

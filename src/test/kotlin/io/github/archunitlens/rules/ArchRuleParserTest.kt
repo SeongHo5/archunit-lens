@@ -301,6 +301,41 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertEquals(SupportStatus.Supported, annotationExclusivity.descriptor.supportStatus)
     }
 
+    fun testDiscoversSupportedDescriptorForResideInAnyPackageDependencyRuleWithAnyPackageOnSourceAndTarget() {
+        val discovered = discoverSingleRule(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+
+                class ArchitectureRules {
+                    @ArchTest
+                    static final ArchRule application_should_not_depend_on_adapters =
+                            noClasses()
+                                    .that()
+                                    .resideInAnyPackage("..application..", "..domain..")
+                                    .should()
+                                    .dependOnClassesThat()
+                                    .resideInAnyPackage("..adapter..", "..infrastructure..");
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(discovered.liveRule is PackageDependencyBanRule)
+        discovered.liveRule as PackageDependencyBanRule
+        assertEquals(listOf("..application..", "..domain.."), discovered.liveRule.sourcePackagePatterns)
+        assertEquals(listOf("..adapter..", "..infrastructure.."), discovered.liveRule.forbiddenPackagePatterns)
+        assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
+        assertEquals(
+            PredicateExpr.Leaf("resideInAnyPackage(..application.., ..domain..)"),
+            discovered.descriptor.predicate,
+        )
+        assertEquals(
+            ConditionExpr.Leaf("dependOnClassesThat.resideInPackages(..adapter.., ..infrastructure..)"),
+            discovered.descriptor.condition,
+        )
+    }
+
     fun testDiscoversSupportedDescriptorForResideInAnyPackageDependencyRule() {
         val discovered = discoverSingleRule(
             """
@@ -654,7 +689,7 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         val supportStatus = discovered.descriptor.supportStatus
         assertTrue(supportStatus is SupportStatus.Unsupported)
         supportStatus as SupportStatus.Unsupported
-        assertEquals(UnsupportedReason.ResideInAnyPackage, supportStatus.reason)
+        assertEquals(UnsupportedReason.UnsupportedMultiPackageRuleShape, supportStatus.reason)
     }
 
     fun testMalformedRuleDoesNotParse() {
