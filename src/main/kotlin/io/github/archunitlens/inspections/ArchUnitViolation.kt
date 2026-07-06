@@ -50,8 +50,8 @@ internal sealed interface ArchUnitViolation {
 internal fun ArchUnitViolation.quickFixes(): Array<LocalQuickFix> = when (this) {
     is ArchUnitViolation.ForbiddenDependency -> navigationFixes()
     is ArchUnitViolation.MissingClassNameSuffix -> arrayOf(
-        GoToArchRuleQuickFix(rule.ruleName, rule.sourcePointer),
         AppendClassSuffixQuickFix(requiredSuffix),
+        GoToArchRuleQuickFix(rule.ruleName, rule.sourcePointer),
     )
     is ArchUnitViolation.ForbiddenAnnotation -> arrayOf(
         RemoveAnnotationQuickFix(annotationName),

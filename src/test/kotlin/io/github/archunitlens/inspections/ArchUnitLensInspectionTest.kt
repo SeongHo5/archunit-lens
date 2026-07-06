@@ -246,6 +246,10 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         val warnings = warningDescriptions()
         assertTrue(warnings.contains(problemMessage("controller_classes_should_end_with_controller")))
         assertTrue(myFixture.getAllQuickFixes().any { it.text.contains(appendControllerSuffixFixText()) })
+        assertQuickFixOrder(
+            appendControllerSuffixFixText(),
+            goToRuleFixText("controller_classes_should_end_with_controller"),
+        )
     }
 
     fun testClassNameSuffixIgnoresCompliantAndOutsidePackageClasses() {
@@ -320,6 +324,10 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         val warnings = warningDescriptions()
         assertTrue(warnings.contains(problemMessage("domain_should_not_be_service")))
         assertTrue(myFixture.getAllQuickFixes().any { it.text.contains(removeAnnotationFixText("Service")) })
+        assertQuickFixOrder(
+            removeAnnotationFixText("Service"),
+            goToRuleFixText("domain_should_not_be_service"),
+        )
     }
 
     fun testForbiddenAnnotationQuickFixRemovesOnlyForbiddenAnnotation() {
@@ -915,4 +923,10 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         "quickfix.removeAnnotation.name",
         annotationName,
     )
+
+    private fun assertQuickFixOrder(firstText: String, lastText: String) {
+        val fixes = myFixture.getAllQuickFixes()
+        assertTrue(fixes.first().text.contains(firstText))
+        assertTrue(fixes.last().text.contains(lastText))
+    }
 }

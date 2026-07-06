@@ -71,6 +71,34 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         )
     }
 
+    fun testFormatsMultiPackageNonDependencyShapeAsUnsupportedRuleShape() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/ArchitectureRules.java",
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest
+                    static final ArchRule services_should_have_suffix =
+                            classes().that().resideInAnyPackage("..service..", "..application..")
+                                    .should().haveSimpleNameEndingWith("Service");
+                }
+            """.trimIndent(),
+        )
+
+        val service = project.service<ArchRuleProjectService>()
+        val output = ArchUnitLensRuleOverviewFormatter.render(
+            discoveries = service.discoveries(),
+            metrics = service.scanMetrics(),
+        )
+
+        assertTrue(output.contains("services_should_have_suffix"))
+        assertTrue(output.contains(ArchUnitLensBundle.message("overview.unsupported.multiPackageRuleShape")))
+        assertFalse(output.contains("resideInAnyPackage is not supported yet"))
+    }
+
     fun testAppliesOverviewFiltersWithoutChangingDiscoverySource() {
         myFixture.addFileToProject(
             "src/test/java/com/example/ArchitectureRules.java",

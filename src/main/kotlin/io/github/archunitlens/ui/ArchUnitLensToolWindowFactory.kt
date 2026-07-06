@@ -62,7 +62,7 @@ private class ArchUnitLensRuleOverviewPanel(
     private val project: Project,
 ) : JPanel(BorderLayout()) {
     private val settings = service<ArchUnitLensSettings>()
-    private val searchField = JBTextField().apply {
+    private val searchField = JBTextField(SEARCH_FIELD_COLUMNS).apply {
         emptyText.text = ArchUnitLensBundle.message("toolwindow.search.placeholder")
     }
     private val showSupported = JCheckBox(ArchUnitLensBundle.message("toolwindow.filter.supported"))
@@ -261,6 +261,7 @@ private fun packageNameForJavaFile(
 
 private fun <T> readAction(action: () -> T): T = ApplicationManager.getApplication().runReadAction<T>(action)
 
+private const val SEARCH_FIELD_COLUMNS = 24
 private const val REFRESH_DEBOUNCE_MILLIS = 250
 
 private data class RuleOverviewRefreshRequest(
