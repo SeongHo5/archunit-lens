@@ -1,6 +1,7 @@
 package io.github.archunitlens.inspections.quickfix
 
 import com.intellij.codeInsight.intention.FileModifier
+import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo
 import com.intellij.codeInspection.LocalQuickFix
 import com.intellij.codeInspection.ProblemDescriptor
@@ -18,7 +19,8 @@ import io.github.archunitlens.ArchUnitLensBundle
 class GoToArchRuleQuickFix(
     private val ruleName: String,
     private val sourcePointer: SmartPsiElementPointer<out PsiElement>,
-) : LocalQuickFix {
+) : LocalQuickFix,
+    LowPriorityAction {
     override fun getFamilyName() = ArchUnitLensBundle.message("quickfix.goto.family")
 
     override fun getName() = ArchUnitLensBundle.message("quickfix.goto.name", ruleName)
