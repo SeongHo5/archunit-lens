@@ -1,5 +1,16 @@
 # ArchUnit Lens Changelog
 
+## [0.1.2] - 2026-07-08
+
+Patch release focused on safer navigation, clearer overview filtering, and more precise unsupported-rule messaging.
+
+### Fixed
+
+- Lowered **Go to ArchUnit rule** quick-fix priority so direct code fixes stay easier to pick.
+- Kept quick-fix navigation and Rule Overview formatting inside safe IntelliJ read boundaries.
+- Widened the Rule Overview search field for long rule names.
+- Clarified unsupported reasons for multi-package rule shapes.
+
 ## [0.1.1] - 2026-07-03
 
 Patch release focused on Rule Overview refresh stability.
