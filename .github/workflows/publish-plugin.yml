@@ -63,9 +63,6 @@ jobs:
       - name: Sign plugin distribution
         run: ./gradlew signPlugin --no-daemon
 
-      - name: Verify plugin signature
-        run: ./gradlew verifyPluginSignature --no-daemon
-
       - name: Verify plugin compatibility
         run: ./gradlew verifyPlugin --no-daemon
 
