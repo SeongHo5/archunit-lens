@@ -1,5 +1,13 @@
 # ArchUnit Lens Changelog
 
+## [0.1.3] - 2026-07-08
+
+Patch release that republishes the 0.1.2 plugin updates under a new immutable Marketplace version.
+
+### Fixed
+
+- Kept the published plugin behavior aligned with 0.1.2 after the release pipeline retry required a new Marketplace version.
+
 ## [0.1.2] - 2026-07-08
 
 Patch release focused on safer navigation, clearer overview filtering, and more precise unsupported-rule messaging.
