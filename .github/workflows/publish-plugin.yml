@@ -54,5 +54,20 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Verify and publish plugin
-        run: ./gradlew check buildPlugin verifyPlugin publishPlugin --no-daemon
+      - name: Run Gradle checks
+        run: ./gradlew check --no-daemon
+
+      - name: Build plugin distribution
+        run: ./gradlew buildPlugin --no-daemon
+
+      - name: Sign plugin distribution
+        run: ./gradlew signPlugin --no-daemon
+
+      - name: Verify plugin signature
+        run: ./gradlew verifyPluginSignature --no-daemon
+
+      - name: Verify plugin compatibility
+        run: ./gradlew verifyPlugin --no-daemon
+
+      - name: Publish plugin
+        run: ./gradlew publishPlugin --no-daemon
