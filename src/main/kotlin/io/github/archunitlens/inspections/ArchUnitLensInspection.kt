@@ -16,6 +16,7 @@ import com.intellij.psi.util.PsiTreeUtil
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.AnnotationExclusivityRule
 import io.github.archunitlens.rules.ArchRuleProjectService
+import io.github.archunitlens.rules.ClassConventionRule
 import io.github.archunitlens.rules.ClassMetaAnnotationRule
 import io.github.archunitlens.rules.ClassNameSuffixRule
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
@@ -77,6 +78,9 @@ class ArchUnitLensInspection : LocalInspectionTool() {
         val methodMetaAnnotationRules = rules
             .filterIsInstance<MethodMetaAnnotationRule>()
             .filter { it.analyzeScope.includes(packageName) }
+        val classConventionRules = rules
+            .filterIsInstance<ClassConventionRule>()
+            .filter { it.analyzeScope.includes(packageName) }
 
         return object : JavaElementVisitor() {
             override fun visitImportStatement(statement: PsiImportStatement) {
@@ -133,6 +137,18 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             override fun visitClass(aClass: PsiClass) {
                 val nameIdentifier = aClass.nameIdentifier ?: return
                 val className = aClass.name ?: return
+                classConventionRules
+                    .filter { ClassSubjectEvaluator.matches(it, aClass, packageName) }
+                    .forEach { rule ->
+                        ClassSubjectEvaluator.violations(rule, aClass, packageName).forEach { detail ->
+                            val violation = ArchUnitViolation.ClassConvention(rule, detail)
+                            holder.registerProblem(
+                                nameIdentifier,
+                                violation.problemMessage(),
+                                *violation.quickFixes(),
+                            )
+                        }
+                    }
                 suffixRules
                     .firstOrNull { ClassSubjectEvaluator.isMissingRequiredSuffix(aClass, it) }
                     ?.let { rule ->
@@ -238,6 +254,7 @@ private fun io.github.archunitlens.rules.LiveArchRule.isEnabledBy(
     settings: io.github.archunitlens.settings.ArchUnitLensSettingsState,
 ): Boolean = when (this) {
     is ClassNameSuffixRule -> settings.classNamingRulesEnabled
+    is ClassConventionRule -> true
     is PackageDependencyBanRule -> settings.dependencyRulesEnabled
     is ForbiddenAnnotationRule,
     is AnnotationExclusivityRule,

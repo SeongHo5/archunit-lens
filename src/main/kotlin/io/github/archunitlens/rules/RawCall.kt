@@ -1,6 +1,7 @@
 package io.github.archunitlens.rules
 
 import com.intellij.psi.PsiClassObjectAccessExpression
+import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiExpression
 import com.intellij.psi.PsiLambdaExpression
 import com.intellij.psi.PsiLiteralExpression
@@ -34,6 +35,7 @@ sealed interface RawArgument {
     data class ClassLiteral(
         override val position: Int,
         val canonicalName: String,
+        val resolvedQualifiedName: String? = null,
     ) : RawArgument
 
     data class Reference(
@@ -83,7 +85,11 @@ object RawCallExtractor {
 
     private fun PsiExpression.toRawArgument(position: Int): RawArgument = when {
         stringLiteralValue() != null -> RawArgument.StringLiteral(position, stringLiteralValue()!!)
-        classLiteralName() != null -> RawArgument.ClassLiteral(position, classLiteralName()!!)
+        classLiteralName() != null -> RawArgument.ClassLiteral(
+            position,
+            classLiteralName()!!,
+            classLiteralResolvedName(),
+        )
         this is PsiMethodCallExpression -> RawArgument.NestedCall(position, methodExpression.referenceName)
         this is PsiLambdaExpression -> RawArgument.Lambda(position)
         this is PsiNewExpression -> RawArgument.CustomExpression(position, text)
@@ -95,5 +101,10 @@ object RawCallExtractor {
     private fun PsiExpression.unwrapped(): PsiExpression = when (this) {
         is PsiParenthesizedExpression -> expression?.unwrapped() ?: this
         else -> this
+    }
+
+    private fun PsiExpression.classLiteralResolvedName(): String? {
+        val classObject = this as? PsiClassObjectAccessExpression ?: return null
+        return (classObject.operand.type as? PsiClassType)?.resolve()?.qualifiedName
     }
 }

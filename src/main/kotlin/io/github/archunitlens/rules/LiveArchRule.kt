@@ -14,6 +14,19 @@ sealed interface LiveArchRule {
 }
 
 /**
+ * Statically evaluable class convention composed only from supported typed
+ * [predicate] and [condition] nodes.
+ */
+data class ClassConventionRule(
+    override val ruleName: String,
+    val predicate: PredicateExpr,
+    val condition: ConditionExpr,
+    override val sourcePointer: SmartPsiElementPointer<out PsiElement>,
+    override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
+    override val reason: String? = null,
+) : LiveArchRule
+
+/**
  * Rule requiring classes in [sourcePackagePatterns] to avoid dependencies on
  * [forbiddenPackagePatterns].
  */

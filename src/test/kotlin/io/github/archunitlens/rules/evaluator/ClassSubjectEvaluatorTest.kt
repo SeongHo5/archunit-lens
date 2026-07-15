@@ -6,6 +6,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.rules.ArchRuleParser
 import io.github.archunitlens.rules.ArchRuleSource
 import io.github.archunitlens.rules.ArchRuleSourceFinder
+import io.github.archunitlens.rules.ClassConventionRule
 import io.github.archunitlens.rules.ClassMetaAnnotationRule
 import io.github.archunitlens.rules.ClassNameSuffixRule
 import io.github.archunitlens.rules.InterfaceNamingRule
@@ -141,6 +142,95 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
 
         assertTrue(ClassSubjectEvaluator.isForbiddenMetaAnnotation(annotation, rule))
     }
+
+    fun testEvaluatesStaticClassPredicateLeaves() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Required.java",
+            "package com.example; public @interface Required {}",
+        )
+        val annotated = addJavaClass(
+            "src/test/java/com/example/service/AnnotatedService.java",
+            "package com.example.service; @com.example.Required class AnnotatedService {}",
+        )
+        val plain = addJavaClass(
+            "src/test/java/com/example/web/PlainController.java",
+            "package com.example.web; class PlainController {}",
+        )
+        val anInterface = addJavaClass(
+            "src/test/java/com/example/Port.java",
+            "package com.example; interface Port {}",
+        )
+        val anEnum = addJavaClass(
+            "src/test/java/com/example/State.java",
+            "package com.example; enum State { OPEN }",
+        )
+
+        assertPredicate("areAnnotatedWith(\"com.example.Required\")", annotated, "com.example.service", expected = true)
+        assertPredicate("areNotAnnotatedWith(\"com.example.Required\")", plain, "com.example.web", expected = true)
+        assertPredicate("resideInAnyPackage(\"..service..\", \"..api..\")", annotated, "com.example.service", expected = true)
+        assertPredicate("haveSimpleNameEndingWith(\"Service\")", annotated, "com.example.service", expected = true)
+        assertPredicate("haveSimpleNameNotEndingWith(\"Impl\")", annotated, "com.example.service", expected = true)
+        assertPredicate("areInterfaces()", anInterface, "com.example", expected = true)
+        assertPredicate("areNotInterfaces()", plain, "com.example.web", expected = true)
+        assertPredicate("areEnums()", anEnum, "com.example", expected = true)
+        assertPredicate("areNotEnums()", plain, "com.example.web", expected = true)
+        assertPredicate("resideInAPackage(\"..service..\")", plain, "com.example.web", expected = false)
+    }
+
+    fun testEvaluatesAndShouldViolationsIndependentlyInSourceOrder() {
+        val rule = parseRule<ClassConventionRule>(
+            classConventionRule(
+                "resideInAPackage(\"..mapper..\")",
+                "beInterfaces().andShould().haveSimpleNameEndingWith(\"Mapper\").andShould().beAnnotatedWith(\"com.example.Mapper\")",
+            ),
+        )
+        val broken = addJavaClass(
+            "src/test/java/com/example/mapper/BrokenAdapter.java",
+            "package com.example.mapper; class BrokenAdapter {}",
+        )
+        val partial = addJavaClass(
+            "src/test/java/com/example/mapper/PartialAdapter.java",
+            "package com.example.mapper; interface PartialAdapter {}",
+        )
+
+        assertEquals(
+            listOf(
+                ClassConditionViolation.MustBeInterface,
+                ClassConditionViolation.MissingSuffix("Mapper"),
+                ClassConditionViolation.MissingAnnotation("com.example.Mapper"),
+            ),
+            ClassSubjectEvaluator.violations(rule, broken, "com.example.mapper"),
+        )
+        assertEquals(
+            listOf(
+                ClassConditionViolation.MissingSuffix("Mapper"),
+                ClassConditionViolation.MissingAnnotation("com.example.Mapper"),
+            ),
+            ClassSubjectEvaluator.violations(rule, partial, "com.example.mapper"),
+        )
+    }
+
+    private fun assertPredicate(
+        predicate: String,
+        aClass: com.intellij.psi.PsiClass,
+        packageName: String,
+        expected: Boolean,
+    ) {
+        val rule = parseRule<ClassConventionRule>(classConventionRule(predicate, "beEnums()"))
+        assertEquals(expected, ClassSubjectEvaluator.matches(rule, aClass, packageName))
+    }
+
+    private fun classConventionRule(
+        predicate: String,
+        condition: String,
+    ): String = """
+        import com.tngtech.archunit.junit.ArchTest;
+        import com.tngtech.archunit.lang.ArchRule;
+        import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+        class ArchitectureRules {
+            @ArchTest static final ArchRule rule = classes().that().$predicate.should().$condition;
+        }
+    """.trimIndent()
 
     private inline fun <reified T> parseRule(code: String): T {
         val source = findSingleSource(code)

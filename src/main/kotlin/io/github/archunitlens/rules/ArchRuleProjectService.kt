@@ -355,6 +355,7 @@ private fun LiveArchRule.appliesToPackage(packageName: String): Boolean = analyz
         is ClassNameSuffixRule -> PackagePattern.matches(sourcePackagePattern, packageName)
         is ForbiddenAnnotationRule -> PackagePattern.matches(sourcePackagePattern, packageName)
         is AnnotationExclusivityRule,
+        is ClassConventionRule,
         is InterfaceNamingRule,
         is ClassMetaAnnotationRule,
         is MethodMetaAnnotationRule,

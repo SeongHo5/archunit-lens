@@ -762,6 +762,107 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testClassConventionReportsIndependentAndShouldViolations() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Mapper.java",
+            "package com.example; public @interface Mapper {}",
+        )
+        addArchitectureRulesFixture("classConventionMapper")
+        configureJavaFixture("BrokenAdapter.java", "javaSources/classConventions/BrokenAdapter.java")
+
+        val warnings = warningDescriptions()
+        assertEquals(3, warnings.size)
+        assertTrue(warnings[0].contains(ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface")))
+        assertTrue(warnings[1].contains(ArchUnitLensBundle.message("inspection.problem.class.missingSuffix", "Mapper")))
+        assertTrue(warnings[2].contains(ArchUnitLensBundle.message("inspection.problem.class.missingAnnotation", "com.example.Mapper")))
+    }
+
+    fun testSpringMapStructAndMyBatisClassConventions() {
+        addArchitectureRulesFixture("classConventionExamples")
+
+        configureJavaFixture("BrokenEndpoint.java", "javaSources/classConventions/BrokenEndpoint.java")
+        val springWarnings = warningDescriptions()
+        assertEquals(2, springWarnings.size)
+        assertTrue(springWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.missingSuffix", "Controller")) })
+        assertTrue(
+            springWarnings.any {
+                it.contains(
+                    ArchUnitLensBundle.message(
+                        "inspection.problem.class.missingAnnotation",
+                        "org.springframework.stereotype.Controller",
+                    ),
+                )
+            },
+        )
+
+        configureJavaFixture("OrderConverter.java", "javaSources/classConventions/OrderConverter.java")
+        val mapStructWarnings = warningDescriptions()
+        assertEquals(2, mapStructWarnings.size)
+        assertTrue(mapStructWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface")) })
+        assertTrue(
+            mapStructWarnings.any {
+                it.contains(ArchUnitLensBundle.message("inspection.problem.class.missingAnnotation", "org.mapstruct.Mapper"))
+            },
+        )
+
+        configureJavaFixture("BrokenRepository.java", "javaSources/classConventions/BrokenRepository.java")
+        val myBatisWarnings = warningDescriptions()
+        assertEquals(3, myBatisWarnings.size)
+        assertTrue(myBatisWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface")) })
+        assertTrue(myBatisWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.missingSuffix", "Mapper")) })
+        assertTrue(
+            myBatisWarnings.any {
+                it.contains(
+                    ArchUnitLensBundle.message(
+                        "inspection.problem.class.missingAnnotation",
+                        "org.apache.ibatis.annotations.Mapper",
+                    ),
+                )
+            },
+        )
+    }
+
+    fun testClassConventionPreservesAnalyzeScopeAndBecause() {
+        addArchitectureRulesFixture("classConventionScopeBecause")
+
+        configureJavaFixture("OrderServiceImpl.java", "javaSources/classConventions/OrderServiceImpl.java")
+        val warning = warningDescriptions().single()
+        assertTrue(warning.contains(ArchUnitLensBundle.message("inspection.problem.class.forbiddenSuffix", "Impl")))
+        assertTrue(warning.contains(ArchUnitLensBundle.message("inspection.problem.reason", "Implementations stay behind ports.")))
+
+        myFixture.configureByText(
+            "OutsideServiceImpl.java",
+            "package com.example.outside; class OutsideServiceImpl {}",
+        )
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testUnsupportedClassConditionSiblingProducesNoWarning() {
+        addArchitectureRulesFixture("classConventionUnsupportedSibling")
+        configureJavaFixture("BrokenAdapter.java", "javaSources/classConventions/BrokenAdapter.java")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testDeferredCodeAccessRulesProduceNoWarning() {
+        addArchitectureRulesFixture("deferredCodeAccess")
+        myFixture.configureByText(
+            "LegacyPrinter.java",
+            """
+                package com.example;
+
+                class LegacyPrinter {
+                    void print(Throwable failure) {
+                        System.out.println(failure.getMessage());
+                        failure.printStackTrace();
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
     private fun addPackageDependencyBanRule() {
         addArchitectureRulesFixture("packageDependencyBan")
     }

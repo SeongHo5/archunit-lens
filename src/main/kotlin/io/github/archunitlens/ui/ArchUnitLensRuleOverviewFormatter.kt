@@ -4,7 +4,9 @@ import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.AnalyzeScope
 import io.github.archunitlens.rules.ArchRuleIndexingStatus
 import io.github.archunitlens.rules.ArchRuleScanMetrics
+import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.DiscoveredArchRule
+import io.github.archunitlens.rules.PredicateExpr
 import io.github.archunitlens.rules.SubjectKind
 import io.github.archunitlens.rules.SupportStatus
 import io.github.archunitlens.rules.UnsupportedReason
@@ -134,8 +136,8 @@ internal object ArchUnitLensRuleOverviewFormatter {
         appendLine(indented("overview.status", descriptor.supportStatus.label()))
         appendLine(indented("overview.subject", descriptor.subject.label()))
         appendLine(indented("overview.scope", descriptor.scope.label()))
-        appendLine(indented("overview.predicate", descriptor.predicate))
-        appendLine(indented("overview.condition", descriptor.condition))
+        appendLine(indented("overview.predicate", descriptor.predicate.display()))
+        appendLine(indented("overview.condition", descriptor.condition.display()))
         descriptor.reason?.let { appendLine(indented("overview.reason", it)) }
         appendLine(indented("overview.source", item.sourceFileName ?: discovery.ruleName))
         if (includeDiagnostic) {
@@ -238,6 +240,39 @@ internal object ArchUnitLensRuleOverviewFormatter {
             symbol,
         )
         UnsupportedReason.UnsupportedOrAmbiguousRuleChain -> ArchUnitLensBundle.message("overview.unsupported.ambiguous")
+    }
+
+    private fun PredicateExpr.display(): String = when (this) {
+        PredicateExpr.All -> "all"
+        is PredicateExpr.Leaf -> predicate
+        is PredicateExpr.AreAnnotatedWith -> "areAnnotatedWith($qualifiedName)"
+        is PredicateExpr.AreNotAnnotatedWith -> "areNotAnnotatedWith($qualifiedName)"
+        is PredicateExpr.ResideInPackages -> "resideInPackages(${patterns.joinToString()})"
+        is PredicateExpr.HaveSimpleNameEndingWith -> "haveSimpleNameEndingWith($suffix)"
+        is PredicateExpr.HaveSimpleNameNotEndingWith -> "haveSimpleNameNotEndingWith($suffix)"
+        is PredicateExpr.AreInterfaces -> if (expected) "areInterfaces" else "areNotInterfaces"
+        is PredicateExpr.AreEnums -> if (expected) "areEnums" else "areNotEnums"
+        is PredicateExpr.And -> "(${left.display()} AND ${right.display()})"
+        is PredicateExpr.Or -> "(${left.display()} OR ${right.display()})"
+    }
+
+    private fun ConditionExpr.display(): String = when (this) {
+        is ConditionExpr.Leaf -> condition
+        is ConditionExpr.BeAnnotatedWith -> if (required) {
+            "beAnnotatedWith($qualifiedName)"
+        } else {
+            "notBeAnnotatedWith($qualifiedName)"
+        }
+        is ConditionExpr.ResideInPackages -> "resideInPackages(${patterns.joinToString()})"
+        is ConditionExpr.HaveSimpleNameEndingWith -> if (required) {
+            "haveSimpleNameEndingWith($suffix)"
+        } else {
+            "haveSimpleNameNotEndingWith($suffix)"
+        }
+        is ConditionExpr.BeInterfaces -> if (required) "beInterfaces" else "notBeInterfaces"
+        is ConditionExpr.BeEnums -> if (required) "beEnums" else "notBeEnums"
+        is ConditionExpr.BeAssignableTo -> "beAssignableTo($qualifiedName)"
+        is ConditionExpr.And -> "(${left.display()} AND ${right.display()})"
     }
 
     private fun indented(

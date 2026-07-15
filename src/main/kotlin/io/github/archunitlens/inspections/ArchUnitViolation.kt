@@ -7,6 +7,7 @@ import io.github.archunitlens.inspections.quickfix.AppendClassSuffixQuickFix
 import io.github.archunitlens.inspections.quickfix.GoToArchRuleQuickFix
 import io.github.archunitlens.inspections.quickfix.RemoveAnnotationQuickFix
 import io.github.archunitlens.rules.LiveArchRule
+import io.github.archunitlens.rules.evaluator.ClassConditionViolation
 
 /**
  * Semantic reason why a supported ArchUnit rule was violated.
@@ -42,6 +43,11 @@ internal sealed interface ArchUnitViolation {
         override val rule: LiveArchRule,
         val assignableToQualifiedName: String,
     ) : ArchUnitViolation
+
+    data class ClassConvention(
+        override val rule: LiveArchRule,
+        val detail: ClassConditionViolation,
+    ) : ArchUnitViolation
 }
 
 /**
@@ -59,12 +65,13 @@ internal fun ArchUnitViolation.quickFixes(): Array<LocalQuickFix> = when (this) 
     )
     is ArchUnitViolation.MissingInterface -> navigationFixes()
     is ArchUnitViolation.MissingAssignableType -> navigationFixes()
+    is ArchUnitViolation.ClassConvention -> navigationFixes()
 }
 
 @InspectionMessage
 internal fun ArchUnitViolation.problemMessage(): String = listOfNotNull(
     ArchUnitLensBundle.message("inspection.problem.message", rule.ruleName),
-    dependencyMessage(),
+    detailMessage(),
     rule.reason?.let { ArchUnitLensBundle.message("inspection.problem.reason", it) },
 ).joinToString(separator = "\n")
 
@@ -72,12 +79,29 @@ private fun ArchUnitViolation.navigationFixes(): Array<LocalQuickFix> = arrayOf(
     GoToArchRuleQuickFix(rule.ruleName, rule.sourcePointer),
 )
 
-private fun ArchUnitViolation.dependencyMessage(): String? = when (this) {
+private fun ArchUnitViolation.detailMessage(): String? = when (this) {
     is ArchUnitViolation.ForbiddenDependency -> ArchUnitLensBundle.message(
         "inspection.problem.dependency",
         referenceKind,
         targetQualifiedName,
         forbiddenPackagePattern,
     )
+    is ArchUnitViolation.ClassConvention -> detail.message()
     else -> null
+}
+
+private fun ClassConditionViolation.message(): String = when (this) {
+    is ClassConditionViolation.MissingAnnotation -> ArchUnitLensBundle.message("inspection.problem.class.missingAnnotation", qualifiedName)
+    is ClassConditionViolation.ForbiddenAnnotation -> ArchUnitLensBundle.message("inspection.problem.class.forbiddenAnnotation", qualifiedName)
+    is ClassConditionViolation.OutsidePackages -> ArchUnitLensBundle.message(
+        "inspection.problem.class.outsidePackages",
+        patterns.joinToString(),
+    )
+    is ClassConditionViolation.MissingSuffix -> ArchUnitLensBundle.message("inspection.problem.class.missingSuffix", suffix)
+    is ClassConditionViolation.ForbiddenSuffix -> ArchUnitLensBundle.message("inspection.problem.class.forbiddenSuffix", suffix)
+    ClassConditionViolation.MustBeInterface -> ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface")
+    ClassConditionViolation.MustNotBeInterface -> ArchUnitLensBundle.message("inspection.problem.class.mustNotBeInterface")
+    ClassConditionViolation.MustBeEnum -> ArchUnitLensBundle.message("inspection.problem.class.mustBeEnum")
+    ClassConditionViolation.MustNotBeEnum -> ArchUnitLensBundle.message("inspection.problem.class.mustNotBeEnum")
+    is ClassConditionViolation.MissingAssignableType -> ArchUnitLensBundle.message("inspection.problem.class.assignableTo", qualifiedName)
 }

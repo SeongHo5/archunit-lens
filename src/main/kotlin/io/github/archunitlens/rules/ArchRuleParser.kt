@@ -37,7 +37,7 @@ object ArchRuleParser {
         fun normalize(
             source: ArchRuleSource,
             calls: List<RawCall>,
-        ): DiscoveredArchRule = when (val decision = routeExactHandlers(source, calls) { ExactHandlerDecision.NotApplicable }) {
+        ): DiscoveredArchRule = when (val decision = routeExactHandlers(source, calls) { parseClassConvention(source, calls) }) {
             is ExactHandlerDecision.Matched -> DiscoveredArchRule(
                 ruleName = source.ruleName,
                 descriptor = decision.rule.toDescriptor(calls, source),
@@ -99,6 +99,34 @@ object ArchRuleParser {
         }
         return rule?.let(ExactHandlerDecision::Matched)
             ?: ExactHandlerDecision.Unsupported(calls.unresolvedReason())
+    }
+
+    private fun parseClassConvention(
+        source: ArchRuleSource,
+        calls: List<RawCall>,
+    ): ExactHandlerDecision {
+        if (calls.firstOrNull()?.name != "classes") return ExactHandlerDecision.NotApplicable
+        calls.validateStaticArguments()?.let { return ExactHandlerDecision.Unsupported(it) }
+        if (calls.dropLast(1).any { it.name == "because" }) {
+            return ExactHandlerDecision.Unsupported(UnsupportedReason.UnsupportedOrAmbiguousRuleChain)
+        }
+        val shouldIndex = calls.indexOfFirst { it.name == "should" }
+        if (shouldIndex < 1) return ExactHandlerDecision.Unsupported(UnsupportedReason.UnsupportedOrAmbiguousRuleChain)
+        val predicate = calls.take(shouldIndex).classPredicate(source.initializer)
+            ?: return ExactHandlerDecision.Unsupported(calls.classFallbackReason(source.initializer))
+        val condition = calls.drop(shouldIndex + 1).withoutTrailingBecauseCall().classCondition(source.initializer)
+            ?: return ExactHandlerDecision.Unsupported(calls.classFallbackReason(source.initializer))
+
+        return ExactHandlerDecision.Matched(
+            ClassConventionRule(
+                ruleName = source.ruleName,
+                predicate = predicate,
+                condition = condition,
+                sourcePointer = source.fieldPointer,
+                analyzeScope = source.analyzeScope,
+                reason = calls.reason(),
+            ),
+        )
     }
 
     private fun parsePackageDependencyBan(
@@ -359,11 +387,15 @@ object ArchRuleParser {
         for (call in this) {
             val expectation = when (call.name) {
                 "classes", "noClasses", "methods", "that", "should", "andShould", "dependOnClassesThat",
-                "areInterfaces", "beInterfaces", "areDeclaredInClassesThat",
+                "and", "or", "areInterfaces", "areNotInterfaces", "areEnums", "areNotEnums",
+                "beInterfaces", "notBeInterfaces", "beEnums", "notBeEnums", "areDeclaredInClassesThat",
                 -> ArgumentExpectation.None
                 "resideInAnyPackage" -> ArgumentExpectation.Strings(minimum = 1)
-                "resideInAPackage", "haveSimpleNameEndingWith", "because" -> ArgumentExpectation.Strings(exact = 1)
-                "areAnnotatedWith", "beAnnotatedWith", "notBeAnnotatedWith", "notBeMetaAnnotatedWith", "beAssignableTo" ->
+                "resideInAPackage", "haveSimpleNameEndingWith", "haveSimpleNameNotEndingWith", "because" ->
+                    ArgumentExpectation.Strings(exact = 1)
+                "areAnnotatedWith", "areNotAnnotatedWith", "beAnnotatedWith", "notBeAnnotatedWith",
+                "notBeMetaAnnotatedWith", "beAssignableTo",
+                ->
                     ArgumentExpectation.Annotation(exact = 1)
                 else -> continue
             }
@@ -432,6 +464,110 @@ object ArchRuleParser {
         }
     }
 
+    private fun List<RawCall>.classPredicate(context: PsiExpression): PredicateExpr? {
+        if (firstOrNull()?.name != "classes") return null
+        val predicateCalls = drop(1).let { remaining ->
+            if (remaining.firstOrNull()?.name == "that") remaining.drop(1) else remaining
+        }
+        if (predicateCalls.isEmpty()) return PredicateExpr.All
+
+        var expression: PredicateExpr? = null
+        var pendingOperator: String? = null
+        predicateCalls.forEach { call ->
+            if (call.name == "and" || call.name == "or") {
+                if (expression == null || pendingOperator != null) return null
+                pendingOperator = call.name
+            } else {
+                val leaf = call.classPredicateLeaf(context) ?: return null
+                expression = expression.appendPredicate(leaf, pendingOperator)
+                pendingOperator = null
+            }
+        }
+        return expression.takeIf { pendingOperator == null }
+    }
+
+    private fun RawCall.classPredicateLeaf(context: PsiExpression): PredicateExpr? = when (name) {
+        "areAnnotatedWith" -> staticQualifiedType(context)?.let(PredicateExpr::AreAnnotatedWith)
+        "areNotAnnotatedWith" -> staticQualifiedType(context)?.let(PredicateExpr::AreNotAnnotatedWith)
+        "resideInAPackage", "resideInAnyPackage" -> PredicateExpr.ResideInPackages(stringArgs)
+        "haveSimpleNameEndingWith" -> stringArgs.singleOrNull()?.let(PredicateExpr::HaveSimpleNameEndingWith)
+        "haveSimpleNameNotEndingWith" -> stringArgs.singleOrNull()?.let(PredicateExpr::HaveSimpleNameNotEndingWith)
+        "areInterfaces" -> PredicateExpr.AreInterfaces(expected = true)
+        "areNotInterfaces" -> PredicateExpr.AreInterfaces(expected = false)
+        "areEnums" -> PredicateExpr.AreEnums(expected = true)
+        "areNotEnums" -> PredicateExpr.AreEnums(expected = false)
+        else -> null
+    }
+
+    private fun List<RawCall>.classCondition(context: PsiExpression): ConditionExpr? {
+        if (isEmpty()) return null
+        var expression: ConditionExpr? = null
+        var expectsCondition = true
+        forEach { call ->
+            if (call.name == "andShould") {
+                if (expectsCondition || expression == null) return null
+                expectsCondition = true
+            } else {
+                if (!expectsCondition) return null
+                val leaf = call.classConditionLeaf(context) ?: return null
+                expression = expression?.let { ConditionExpr.And(it, leaf) } ?: leaf
+                expectsCondition = false
+            }
+        }
+        return expression.takeIf { !expectsCondition }
+    }
+
+    private fun RawCall.classConditionLeaf(context: PsiExpression): ConditionExpr? = when (name) {
+        "beAnnotatedWith" -> staticQualifiedType(context)?.let { ConditionExpr.BeAnnotatedWith(it, required = true) }
+        "notBeAnnotatedWith" -> staticQualifiedType(context)?.let { ConditionExpr.BeAnnotatedWith(it, required = false) }
+        "resideInAPackage", "resideInAnyPackage" -> ConditionExpr.ResideInPackages(stringArgs)
+        "haveSimpleNameEndingWith" -> stringArgs.singleOrNull()?.let {
+            ConditionExpr.HaveSimpleNameEndingWith(it, required = true)
+        }
+        "haveSimpleNameNotEndingWith" -> stringArgs.singleOrNull()?.let {
+            ConditionExpr.HaveSimpleNameEndingWith(it, required = false)
+        }
+        "beInterfaces" -> ConditionExpr.BeInterfaces(required = true)
+        "notBeInterfaces" -> ConditionExpr.BeInterfaces(required = false)
+        "beEnums" -> ConditionExpr.BeEnums(required = true)
+        "notBeEnums" -> ConditionExpr.BeEnums(required = false)
+        "beAssignableTo" -> staticQualifiedType(context)?.let(ConditionExpr::BeAssignableTo)
+        else -> null
+    }
+
+    private fun RawCall.staticQualifiedType(context: PsiExpression): String? = stringArgs.singleOrNull()?.takeIf { it.contains('.') }
+        ?: arguments.singleOrNull()
+            ?.let { it as? RawArgument.ClassLiteral }
+            ?.resolvedQualifiedName
+            ?.let { qualifyClassLiteral(it, context) }
+
+    private fun List<RawCall>.classFallbackReason(context: PsiExpression): UnsupportedReason {
+        val typeCall = firstOrNull {
+            it.name in setOf(
+                "areAnnotatedWith",
+                "areNotAnnotatedWith",
+                "beAnnotatedWith",
+                "notBeAnnotatedWith",
+                "beAssignableTo",
+            ) &&
+                it.staticQualifiedType(context) == null
+        }
+        if (typeCall != null) {
+            val symbol = typeCall.arguments.singleOrNull()?.let { argument ->
+                when (argument) {
+                    is RawArgument.StringLiteral -> argument.value
+                    is RawArgument.ClassLiteral -> argument.canonicalName
+                    is RawArgument.Reference -> argument.text
+                    is RawArgument.NestedCall -> argument.methodName ?: "helper"
+                    is RawArgument.Lambda -> "lambda"
+                    is RawArgument.CustomExpression -> argument.text
+                }
+            }.orEmpty()
+            return UnsupportedReason.UnresolvedSymbol(typeCall.name, symbol)
+        }
+        return UnsupportedReason.UnsupportedOrAmbiguousRuleChain
+    }
+
     private fun unsupportedDescriptor(
         source: ArchRuleSource,
         calls: List<RawCall>,
@@ -451,6 +587,15 @@ object ArchRuleParser {
         calls: List<RawCall>,
         source: ArchRuleSource,
     ): RuleDescriptor = when (this) {
+        is ClassConventionRule -> RuleDescriptor(
+            subject = SubjectKind.Classes,
+            sourcePointer = sourcePointer,
+            scope = analyzeScope,
+            predicate = predicate,
+            condition = condition,
+            reason = reason,
+            supportStatus = SupportStatus.Supported,
+        )
         is PackageDependencyBanRule -> RuleDescriptor(
             subject = SubjectKind.Classes,
             sourcePointer = sourcePointer,

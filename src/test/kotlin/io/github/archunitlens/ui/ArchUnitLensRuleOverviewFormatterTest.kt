@@ -73,7 +73,7 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         )
     }
 
-    fun testFormatsMultiPackageNonDependencyShapeAsUnsupportedRuleShape() {
+    fun testFormatsSupportedMultiPackageClassConvention() {
         myFixture.addFileToProject(
             "src/test/java/com/example/ArchitectureRules.java",
             """
@@ -97,8 +97,8 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         )
 
         assertTrue(output.contains("services_should_have_suffix"))
-        assertTrue(output.contains(ArchUnitLensBundle.message("overview.unsupported.multiPackageRuleShape")))
-        assertFalse(output.contains("resideInAnyPackage is not supported yet"))
+        assertTrue(output.contains(statusLine(ArchUnitLensBundle.message("overview.status.supported"))))
+        assertFalse(output.contains(ArchUnitLensBundle.message("overview.unsupported.multiPackageRuleShape")))
     }
 
     fun testAppliesOverviewFiltersWithoutChangingDiscoverySource() {

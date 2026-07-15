@@ -9,6 +9,10 @@ class PackagePatternTest {
     fun matchesSegmentBoundedMiddlePattern() {
         assertTrue(PackagePattern.matches("..domain..", "com.example.domain.order"))
         assertFalse(PackagePattern.matches("..domain..", "com.example.notdomain.order"))
+        assertTrue(PackagePattern.matches("..service..", "com.example.service"))
+        assertTrue(PackagePattern.matches("..service..", "com.example.service.order"))
+        assertFalse(PackagePattern.matches("..service..", "com.example.services"))
+        assertFalse(PackagePattern.matches("..service..", "com.example.notservice"))
     }
 
     @Test
