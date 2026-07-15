@@ -1,6 +1,8 @@
 # ArchUnit Lens Changelog
 
-## Unreleased
+## [0.2.0] - 2026-07-16
+
+Minor release focused on live editor feedback for statically provable Java class conventions.
 
 ### Added
 
