@@ -575,7 +575,7 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         val fix = myFixture.getAllQuickFixes().single {
             it.text.contains(removeAnnotationFixText("SecondaryMapper"))
         }
-        myFixture.launchAction(fix)
+        myFixture.checkPreviewAndLaunchAction(fix)
 
         myFixture.checkResult(
             """

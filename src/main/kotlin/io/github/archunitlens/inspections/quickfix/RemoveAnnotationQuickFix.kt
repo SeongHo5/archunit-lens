@@ -2,7 +2,6 @@ package io.github.archunitlens.inspections.quickfix
 
 import com.intellij.codeInspection.LocalQuickFix
 import com.intellij.codeInspection.ProblemDescriptor
-import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiAnnotation
 import io.github.archunitlens.ArchUnitLensBundle
@@ -20,8 +19,6 @@ class RemoveAnnotationQuickFix(private val annotationName: String) : LocalQuickF
 
     override fun applyFix(project: Project, descriptor: ProblemDescriptor) {
         val annotation = descriptor.psiElement as? PsiAnnotation ?: return
-        WriteCommandAction.runWriteCommandAction(project) {
-            annotation.delete()
-        }
+        annotation.delete()
     }
 }
