@@ -40,7 +40,7 @@ static final ArchRule mapperAnnotationMustBeExclusive =
         .because("Mapper annotations must be exclusive.");
 ```
 
-## Current support scope
+## 0.2.0 support scope
 
 ArchUnit Lens supports only statically provable Java rule-field patterns. Unsupported or ambiguous DSL chains are retained as Rule Overview metadata when possible and never produce live warnings. The canonical support reference is [`docs/rule-support-matrix.md`](docs/rule-support-matrix.md).
 
@@ -89,7 +89,7 @@ Use **Settings | Tools | ArchUnit Lens** for per-rule-family enable/disable, ove
 
 ## Compatibility and local development
 
-- Plugin version: `0.1.3`
+- Plugin version: `0.2.0`
 - Gradle toolchain and GitHub Actions CI: use JDK 21.
 - ArchUnit reference sources are pinned by `archUnit.reference.version` in `gradle.properties` and unpacked only for local DSL analysis; ArchUnit is not on the plugin compile/runtime classpath.
 
