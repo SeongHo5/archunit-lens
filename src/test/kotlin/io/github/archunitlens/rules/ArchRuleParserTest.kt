@@ -2,8 +2,25 @@ package io.github.archunitlens.rules
 
 import com.intellij.psi.PsiFile
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import java.nio.file.Path
 
 class ArchRuleParserTest : BasePlatformTestCase() {
+    override fun setUp() {
+        super.setUp()
+        myFixture.addFileToProject(
+            "src/test/java/org/springframework/stereotype/Service.java",
+            "package org.springframework.stereotype; public @interface Service {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Service.java",
+            "package com.example; public @interface Service {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/QueryMapper.java",
+            "package com.example; public interface QueryMapper {}",
+        )
+    }
+
     fun testParsesPackageDependencyBanRule() {
         val rule = parseSingleRule(
             """
@@ -394,18 +411,19 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             """.trimIndent(),
         )
 
-        assertNull(discovered.liveRule)
+        assertTrue(discovered.liveRule is ClassConventionRule)
         assertEquals(
             PredicateExpr.Or(
                 PredicateExpr.And(
-                    PredicateExpr.Leaf("haveSimpleNameEndingWith(Adapter)"),
-                    PredicateExpr.Leaf("areInterfaces"),
+                    PredicateExpr.HaveSimpleNameEndingWith("Adapter"),
+                    PredicateExpr.AreInterfaces(expected = true),
                 ),
-                PredicateExpr.Leaf("areAnnotatedWith(com.example.Marker)"),
+                PredicateExpr.AreAnnotatedWith("com.example.Marker"),
             ),
             discovered.descriptor.predicate,
         )
-        assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        assertEquals(ConditionExpr.BeInterfaces(required = true), discovered.descriptor.condition)
+        assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
     }
 
     fun testBooleanPredicateDoesNotPartiallyMatchLiveAnnotationRule() {
@@ -429,18 +447,18 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             """.trimIndent(),
         )
 
-        assertNull(discovered.liveRule)
+        assertTrue(discovered.liveRule is ClassConventionRule)
         assertEquals(
             PredicateExpr.Or(
-                PredicateExpr.Leaf("areAnnotatedWith(org.apache.ibatis.annotations.Mapper)"),
-                PredicateExpr.Leaf("haveSimpleNameEndingWith(Adapter)"),
+                PredicateExpr.AreAnnotatedWith("org.apache.ibatis.annotations.Mapper"),
+                PredicateExpr.HaveSimpleNameEndingWith("Adapter"),
             ),
             discovered.descriptor.predicate,
         )
-        assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
     }
 
-    fun testExtraPredicateDoesNotPartiallyMatchLiveAnnotationRule() {
+    fun testConsecutiveClassPredicatesStayMetadataOnly() {
         val discovered = discoverSingleRule(
             """
                 import com.tngtech.archunit.junit.ArchTest;
@@ -461,14 +479,22 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         )
 
         assertNull(discovered.liveRule)
-        assertEquals(
-            PredicateExpr.And(
-                PredicateExpr.Leaf("resideInAPackage(..persistence..)"),
-                PredicateExpr.Leaf("areAnnotatedWith(org.apache.ibatis.annotations.Mapper)"),
-            ),
-            discovered.descriptor.predicate,
-        )
         assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+    }
+
+    fun testClassPredicatesRequireExplicitThatSelector() {
+        val allClasses = discoverSingleRule(exactRule("classes().should().beEnums()", "classes"))
+        assertTrue(allClasses.liveRule is ClassConventionRule)
+        assertEquals(PredicateExpr.All, allClasses.descriptor.predicate)
+
+        val explicitSelector = discoverSingleRule(classConventionRule("areNotEnums()", "beEnums()"))
+        assertTrue(explicitSelector.liveRule is ClassConventionRule)
+
+        val selectorless = discoverSingleRule(
+            exactRule("classes().areNotEnums().should().beEnums()", "classes"),
+        )
+        assertNull(selectorless.liveRule)
+        assertTrue(selectorless.descriptor.supportStatus is SupportStatus.Unsupported)
     }
 
     fun testParsesQueryMapperInterfaceNamingSubset() {
@@ -664,7 +690,7 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertTrue(ArchRuleSourceFinder.findInFile(file).isEmpty())
     }
 
-    fun testUnsupportedResideInAnyPackageShapeStillStaysMetadataOnly() {
+    fun testSupportsClassConventionWithResideInAnyPackage() {
         val source = findSingleSource(
             """
                 import com.tngtech.archunit.junit.ArchTest;
@@ -683,13 +709,13 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             """.trimIndent(),
         )
 
-        assertNull(ArchRuleParser.discover(source)?.liveRule)
-        val discovered = ArchRuleParser.discover(source) ?: error("Expected unsupported rule metadata")
-        assertNull(discovered.liveRule)
-        val supportStatus = discovered.descriptor.supportStatus
-        assertTrue(supportStatus is SupportStatus.Unsupported)
-        supportStatus as SupportStatus.Unsupported
-        assertEquals(UnsupportedReason.UnsupportedMultiPackageRuleShape, supportStatus.reason)
+        val discovered = ArchRuleParser.discover(source) ?: error("Expected supported rule")
+        assertTrue(discovered.liveRule is ClassConventionRule)
+        assertEquals(
+            PredicateExpr.ResideInPackages(listOf("..service..", "..application..")),
+            discovered.descriptor.predicate,
+        )
+        assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
     }
 
     fun testMalformedRuleDoesNotParse() {
@@ -709,6 +735,400 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertNull(ArchRuleParser.discover(source)?.liveRule)
     }
 
+    fun testParsesEveryStaticClassPredicateLeaf() {
+        val cases = listOf(
+            "areAnnotatedWith(\"com.example.Required\")" to PredicateExpr.AreAnnotatedWith("com.example.Required"),
+            "areNotAnnotatedWith(\"com.example.Forbidden\")" to PredicateExpr.AreNotAnnotatedWith("com.example.Forbidden"),
+            "resideInAPackage(\"..service..\")" to PredicateExpr.ResideInPackages(listOf("..service..")),
+            "resideInAnyPackage(\"..service..\", \"..api..\")" to
+                PredicateExpr.ResideInPackages(listOf("..service..", "..api..")),
+            "haveSimpleNameEndingWith(\"Service\")" to PredicateExpr.HaveSimpleNameEndingWith("Service"),
+            "haveSimpleNameNotEndingWith(\"Impl\")" to PredicateExpr.HaveSimpleNameNotEndingWith("Impl"),
+            "areInterfaces()" to PredicateExpr.AreInterfaces(expected = true),
+            "areNotInterfaces()" to PredicateExpr.AreInterfaces(expected = false),
+            "areEnums()" to PredicateExpr.AreEnums(expected = true),
+            "areNotEnums()" to PredicateExpr.AreEnums(expected = false),
+        )
+
+        cases.forEach { (predicate, expected) ->
+            val discovered = discoverSingleRule(classConventionRule(predicate, "beEnums()"))
+            assertTrue("$predicate should be supported", discovered.liveRule is ClassConventionRule)
+            assertEquals(expected, discovered.descriptor.predicate)
+        }
+    }
+
+    fun testClassPackagePatternsAcceptOnlyTheProvenMatcherSubset() {
+        listOf("com.example.service", "..service..", "..service", "com.example..").forEach { pattern ->
+            val discovered = discoverSingleRule(
+                classConventionRule("resideInAPackage(\"$pattern\")", "beEnums()"),
+            )
+            assertTrue("$pattern should be supported", discovered.liveRule is ClassConventionRule)
+        }
+
+        val unsupportedRules = listOf(
+            classConventionRule("resideInAPackage(\"com.*.service\")", "beEnums()"),
+            classConventionRule("resideInAnyPackage(\"..service..\", \"com..service\")", "beEnums()"),
+            classConventionRule("areNotEnums()", "resideInAPackage(\"com.*.service\")"),
+            classConventionRule("areNotEnums()", "resideInAnyPackage(\"..service..\", \"com..service\")"),
+        )
+        unsupportedRules.forEach { code ->
+            val discovered = discoverSingleRule(code)
+            assertNull(discovered.liveRule)
+            assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        }
+    }
+
+    fun testDanglingClassPredicateTokensStayMetadataOnly() {
+        val malformedRules = listOf(
+            "classes().that().should().beEnums()",
+            "classes().that().resideInAPackage(\"..service..\").and().should().beEnums()",
+            "classes().that().resideInAPackage(\"..service..\").or().should().beEnums()",
+        )
+
+        malformedRules.forEach { initializer ->
+            val discovered = discoverSingleRule(exactRule(initializer, "classes"))
+            assertNull(discovered.liveRule)
+            assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        }
+    }
+
+    fun testParsesEveryStaticClassConditionLeafAndLeftAssociativeAndShould() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Base.java",
+            "package com.example; public class Base {}",
+        )
+        val cases = listOf(
+            "beAnnotatedWith(\"com.example.Required\")" to ConditionExpr.BeAnnotatedWith("com.example.Required", true),
+            "notBeAnnotatedWith(\"com.example.Forbidden\")" to ConditionExpr.BeAnnotatedWith("com.example.Forbidden", false),
+            "resideInAPackage(\"..service..\")" to ConditionExpr.ResideInPackages(listOf("..service..")),
+            "resideInAnyPackage(\"..service..\", \"..api..\")" to
+                ConditionExpr.ResideInPackages(listOf("..service..", "..api..")),
+            "haveSimpleNameEndingWith(\"Service\")" to ConditionExpr.HaveSimpleNameEndingWith("Service", true),
+            "haveSimpleNameNotEndingWith(\"Impl\")" to ConditionExpr.HaveSimpleNameEndingWith("Impl", false),
+            "beInterfaces()" to ConditionExpr.BeInterfaces(required = true),
+            "notBeInterfaces()" to ConditionExpr.BeInterfaces(required = false),
+            "beEnums()" to ConditionExpr.BeEnums(required = true),
+            "notBeEnums()" to ConditionExpr.BeEnums(required = false),
+            "beAssignableTo(\"com.example.Base\")" to ConditionExpr.BeAssignableTo("com.example.Base"),
+        )
+
+        cases.forEach { (condition, expected) ->
+            val discovered = discoverSingleRule(classConventionRule("areEnums()", condition))
+            assertTrue("$condition should be supported", discovered.liveRule is ClassConventionRule)
+            assertEquals(expected, discovered.descriptor.condition)
+        }
+
+        val composite = discoverSingleRule(
+            classConventionRule(
+                "areNotEnums()",
+                "beInterfaces().andShould().haveSimpleNameEndingWith(\"Mapper\").andShould().beAnnotatedWith(\"com.example.Mapper\")",
+            ),
+        )
+        assertEquals(
+            ConditionExpr.And(
+                ConditionExpr.And(
+                    ConditionExpr.BeInterfaces(required = true),
+                    ConditionExpr.HaveSimpleNameEndingWith("Mapper", required = true),
+                ),
+                ConditionExpr.BeAnnotatedWith("com.example.Mapper", required = true),
+            ),
+            composite.descriptor.condition,
+        )
+    }
+
+    fun testUnsupportedClassSiblingMakesWholeFallbackMetadataOnly() {
+        val discovered = discoverSingleRule(
+            classConventionRule(
+                "areEnums()",
+                "beInterfaces().andShould().beAnnotatedWith(annotationType())",
+            ),
+        )
+
+        assertNull(discovered.liveRule)
+        assertTrue((discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnsupportedArgument)
+    }
+
+    fun testUnresolvedClassLiteralMakesWholeFallbackMetadataOnly() {
+        val discovered = discoverSingleRule(
+            classConventionRule(
+                "areNotEnums()",
+                "beAnnotatedWith(com.example.Missing.class)",
+            ),
+        )
+
+        assertNull(discovered.liveRule)
+        assertTrue((discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnresolvedSymbol)
+    }
+
+    fun testUnresolvedAssignableTargetMakesWholeFallbackMetadataOnly() {
+        val discovered = discoverSingleRule(
+            classConventionRule(
+                "areNotEnums()",
+                "beAssignableTo(\"com.example.Missing\")",
+            ),
+        )
+
+        assertNull(discovered.liveRule)
+        assertTrue((discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnresolvedSymbol)
+    }
+
+    fun testUnresolvedClassLiteralsKeepEveryTypeBearingExactHandlerMetadataOnly() {
+        val file = configureJava(testData("archrules/exactUnresolvedClassLiterals.java"))
+        val expectedCases = mapOf(
+            "unresolved_forbidden_annotation" to Pair(
+                ExactHandlerFamily.FORBIDDEN_ANNOTATION,
+                UnsupportedReason.UnresolvedSymbol("beAnnotatedWith", "com.example.missing.Forbidden"),
+            ),
+            "unresolved_annotation_exclusivity" to Pair(
+                ExactHandlerFamily.ANNOTATION_EXCLUSIVITY,
+                UnsupportedReason.UnresolvedSymbol("areAnnotatedWith", "com.example.missing.Required"),
+            ),
+            "unresolved_interface_assignability" to Pair(
+                ExactHandlerFamily.INTERFACE_NAMING,
+                UnsupportedReason.UnresolvedSymbol("beAssignableTo", "com.example.missing.Base"),
+            ),
+            "unresolved_class_meta_annotation" to Pair(
+                ExactHandlerFamily.CLASS_META_ANNOTATION,
+                UnsupportedReason.UnresolvedSymbol("notBeMetaAnnotatedWith", "com.example.missing.Proxy"),
+            ),
+            "unresolved_method_meta_annotation" to Pair(
+                ExactHandlerFamily.METHOD_META_ANNOTATION,
+                UnsupportedReason.UnresolvedSymbol("notBeMetaAnnotatedWith", "com.example.missing.Proxy"),
+            ),
+        )
+
+        val sources = ArchRuleSourceFinder.findInFile(file).associateBy { it.ruleName }
+        assertEquals(expectedCases.keys, sources.keys)
+        expectedCases.forEach { (ruleName, expectedCase) ->
+            val (family, expectedReason) = expectedCase
+            val source = sources.getValue(ruleName)
+            assertEquals(
+                ExactHandlerDecision.Unsupported(expectedReason),
+                ArchRuleParser.classifyExactHandler(family, source, RawCallExtractor.from(source.initializer)),
+            )
+            val discovered = ArchRuleParser.discover(source) ?: error("Expected discovered rule")
+            assertNull(discovered.liveRule)
+            assertEquals(expectedReason, (discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason)
+        }
+    }
+
+    fun testDynamicClassPredicateArgumentMakesWholeFallbackMetadataOnly() {
+        val discovered = discoverSingleRule(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    static String dynamicPackage = "..service..";
+                    @ArchTest static final ArchRule dynamic_predicate = classes().that()
+                            .resideInAnyPackage("..api..", dynamicPackage)
+                            .should().beEnums();
+                }
+            """.trimIndent(),
+        )
+
+        assertNull(discovered.liveRule)
+        val status = discovered.descriptor.supportStatus as SupportStatus.Unsupported
+        assertTrue(status.reason is UnsupportedReason.UnsupportedArgument)
+    }
+
+    fun testDeferredDeclarationAndCodeAccessRulesStayMetadataOnly() {
+        val rules = listOf(
+            exactRule(
+                "classes().should().callMethod(java.lang.Throwable.class, \"printStackTrace\")",
+                "classes",
+            ),
+            exactRule(
+                "classes().should().accessField(java.lang.System.class, \"out\")",
+                "classes",
+            ),
+            exactRule("methods().should().bePublic()", "methods"),
+            exactRule("constructors().should().bePrivate()", "constructors"),
+        )
+
+        rules.forEach { ruleSource ->
+            val discovered = discoverSingleRule(ruleSource)
+            assertNull(discovered.liveRule)
+            assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        }
+    }
+
+    fun testEveryExactHandlerClassifiesOwnedForeignAndMalformedShapes() {
+        val cases = exactHandlerCases()
+        cases.forEachIndexed { index, (family, code) ->
+            val source = findSingleSource(code)
+            val calls = RawCallExtractor.from(source.initializer)
+
+            assertTrue(
+                "$family should match its valid shape",
+                ArchRuleParser.classifyExactHandler(family, source, calls) is ExactHandlerDecision.Matched,
+            )
+            val foreignFamily = cases[(index + 1) % cases.size].first
+            assertEquals(
+                ExactHandlerDecision.NotApplicable,
+                ArchRuleParser.classifyExactHandler(foreignFamily, source, calls),
+            )
+            val malformedCalls = calls.toMutableList().also { malformed ->
+                malformed[0] = malformed[0].copy(arguments = listOf(RawArgument.Reference(0, "dynamic")))
+            }
+            val invalidArity = UnsupportedReason.InvalidArity(calls[0].name, "0", 1)
+            assertEquals(
+                "$family should preserve its exact invalid-arity reason",
+                ExactHandlerDecision.Unsupported(family.expectedExactReason(invalidArity)),
+                ArchRuleParser.classifyExactHandler(family, source, malformedCalls),
+            )
+            val argumentCallIndex = calls.indexOfFirst { it.arguments.isNotEmpty() }
+            assertTrue("$family should have an argument-bearing owned call", argumentCallIndex >= 0)
+            val wrongKindCalls = calls.toMutableList().also { wrongKind ->
+                wrongKind[argumentCallIndex] = wrongKind[argumentCallIndex].copy(
+                    arguments = listOf(RawArgument.Lambda(0)),
+                )
+            }
+            val unsupportedArgument = UnsupportedReason.UnsupportedArgument(calls[argumentCallIndex].name, 0, "lambda")
+            assertEquals(
+                "$family should preserve its exact unsupported-argument reason",
+                ExactHandlerDecision.Unsupported(family.expectedExactReason(unsupportedArgument)),
+                ArchRuleParser.classifyExactHandler(family, source, wrongKindCalls),
+            )
+        }
+    }
+
+    fun testAggregateRouteRunsFallbackOnlyAfterAllExactHandlersDecline() {
+        val exactSource = findSingleSource(exactHandlerCases().first().second)
+        val exactCalls = RawCallExtractor.from(exactSource.initializer)
+        var fallbackCalls = 0
+
+        assertTrue(
+            ArchRuleParser.routeExactHandlers(exactSource, exactCalls) {
+                fallbackCalls++
+                ExactHandlerDecision.NotApplicable
+            } is ExactHandlerDecision.Matched,
+        )
+        assertEquals(0, fallbackCalls)
+
+        val malformedCalls = exactCalls.toMutableList().also { malformed ->
+            val packageCallIndex = malformed.indexOfFirst { it.name == "resideInAPackage" }
+            malformed[packageCallIndex] = malformed[packageCallIndex].copy(
+                arguments = listOf(
+                    RawArgument.StringLiteral(0, "..domain.."),
+                    RawArgument.Reference(1, "dynamicPackage"),
+                ),
+            )
+        }
+        assertTrue(
+            ArchRuleParser.routeExactHandlers(exactSource, malformedCalls) {
+                fallbackCalls++
+                ExactHandlerDecision.NotApplicable
+            } is ExactHandlerDecision.Unsupported,
+        )
+        assertEquals(0, fallbackCalls)
+
+        val fallbackSource = findSingleSource(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule rule = classes().should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        assertEquals(
+            ExactHandlerDecision.NotApplicable,
+            ArchRuleParser.routeExactHandlers(fallbackSource, RawCallExtractor.from(fallbackSource.initializer)) {
+                fallbackCalls++
+                ExactHandlerDecision.NotApplicable
+            },
+        )
+        assertEquals(1, fallbackCalls)
+    }
+
+    fun testMixedLiteralAndDynamicExactArgumentsStayMetadataOnly() {
+        val discovered = discoverSingleRule(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    static String dynamicPackage = "..adapter..";
+                    @ArchTest static final ArchRule rule = noClasses().that()
+                            .resideInAnyPackage("..domain..", dynamicPackage)
+                            .should().dependOnClassesThat().resideInAPackage("..adapter..");
+                }
+            """.trimIndent(),
+        )
+
+        assertNull(discovered.liveRule)
+        val status = discovered.descriptor.supportStatus as SupportStatus.Unsupported
+        assertTrue(status.reason is UnsupportedReason.UnsupportedArgument)
+    }
+
+    private fun exactHandlerCases(): List<Pair<ExactHandlerFamily, String>> = listOf(
+        ExactHandlerFamily.PACKAGE_DEPENDENCY_BAN to exactRule(
+            "noClasses().that().resideInAPackage(\"..domain..\").should().dependOnClassesThat().resideInAPackage(\"..adapter..\")",
+            "noClasses",
+        ),
+        ExactHandlerFamily.CLASS_NAME_SUFFIX to exactRule(
+            "classes().that().resideInAPackage(\"..service..\").should().haveSimpleNameEndingWith(\"Service\")",
+            "classes",
+        ),
+        ExactHandlerFamily.FORBIDDEN_ANNOTATION to exactRule(
+            "noClasses().that().resideInAPackage(\"..domain..\").should().beAnnotatedWith(com.example.Service.class)",
+            "noClasses",
+        ),
+        ExactHandlerFamily.ANNOTATION_EXCLUSIVITY to exactRule(
+            "classes().that().areAnnotatedWith(\"com.example.Mapper\").should().notBeAnnotatedWith(\"com.example.Secondary\")",
+            "classes",
+        ),
+        ExactHandlerFamily.INTERFACE_NAMING to exactRule(
+            "classes().that().haveSimpleNameEndingWith(\"Mapper\").should().beInterfaces().andShould().beAssignableTo(\"com.example.Mapper\")",
+            "classes",
+        ),
+        ExactHandlerFamily.CLASS_META_ANNOTATION to exactRule(
+            "classes().that().areInterfaces().should().notBeMetaAnnotatedWith(\"com.example.Proxy\")",
+            "classes",
+        ),
+        ExactHandlerFamily.METHOD_META_ANNOTATION to exactRule(
+            "methods().that().areDeclaredInClassesThat().areInterfaces().should().notBeMetaAnnotatedWith(\"com.example.Proxy\")",
+            "methods",
+        ),
+    )
+
+    private fun ExactHandlerFamily.expectedExactReason(reason: UnsupportedReason): UnsupportedReason {
+        val metaAnnotationFamily = this == ExactHandlerFamily.CLASS_META_ANNOTATION ||
+            this == ExactHandlerFamily.METHOD_META_ANNOTATION
+        return if (metaAnnotationFamily && reason !is UnsupportedReason.UnresolvedSymbol) {
+            UnsupportedReason.CustomOrMetaAnnotationPredicates
+        } else {
+            reason
+        }
+    }
+
+    private fun exactRule(
+        initializer: String,
+        entryPoint: String,
+    ): String = """
+        import com.tngtech.archunit.junit.ArchTest;
+        import com.tngtech.archunit.lang.ArchRule;
+        import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.$entryPoint;
+        class ArchitectureRules {
+            @ArchTest static final ArchRule rule = $initializer;
+        }
+    """.trimIndent()
+
+    private fun classConventionRule(
+        predicate: String,
+        condition: String,
+    ): String = """
+        import com.tngtech.archunit.junit.ArchTest;
+        import com.tngtech.archunit.lang.ArchRule;
+        import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+        class ArchitectureRules {
+            @ArchTest static final ArchRule rule = classes().that().$predicate.should().$condition;
+        }
+    """.trimIndent()
+
     private fun parseSingleRule(code: String): LiveArchRule {
         val source = findSingleSource(code)
         return ArchRuleParser.discover(source)?.liveRule ?: error("Expected supported ArchUnit Lens rule")
@@ -727,4 +1147,6 @@ class ArchRuleParserTest : BasePlatformTestCase() {
     }
 
     private fun configureJava(code: String): PsiFile = myFixture.configureByText("ArchitectureRules.java", code)
+
+    private fun testData(path: String): String = Path.of("src/test/testData", path).toFile().readText()
 }

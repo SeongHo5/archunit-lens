@@ -16,14 +16,19 @@ import com.intellij.psi.util.PsiTreeUtil
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.AnnotationExclusivityRule
 import io.github.archunitlens.rules.ArchRuleProjectService
+import io.github.archunitlens.rules.ClassConventionRule
 import io.github.archunitlens.rules.ClassMetaAnnotationRule
 import io.github.archunitlens.rules.ClassNameSuffixRule
+import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
 import io.github.archunitlens.rules.InterfaceNamingRule
+import io.github.archunitlens.rules.LiveArchRule
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
+import io.github.archunitlens.rules.PredicateExpr
 import io.github.archunitlens.rules.evaluator.ClassSubjectEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
+import io.github.archunitlens.settings.ArchUnitLensSettingsState
 
 /**
  * Reports supported ArchUnit rule violations directly in Java source files.
@@ -47,9 +52,7 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             .rulesForPackage(packageName)
             .filter { it.isEnabledBy(settings) }
 
-        val dependencyRules = rules
-            .filterIsInstance<PackageDependencyBanRule>()
-            .filter { ClassSubjectEvaluator.appliesToPackage(it, packageName) }
+        val dependencyRules = rules.filterIsInstance<PackageDependencyBanRule>()
         val forbiddenExplicitImports: Set<String> = javaFile.importList
             ?.allImportStatements
             ?.asSequence()
@@ -59,24 +62,13 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             ?.filter { importedName -> dependencyRules.any { ClassSubjectEvaluator.matchedForbiddenDependencyPattern(it, importedName) != null } }
             ?.toSet()
             .orEmpty()
-        val suffixRules = rules
-            .filterIsInstance<ClassNameSuffixRule>()
-            .filter { ClassSubjectEvaluator.appliesToPackage(it, packageName) }
-        val annotationRules = rules
-            .filterIsInstance<ForbiddenAnnotationRule>()
-            .filter { ClassSubjectEvaluator.appliesToPackage(it, packageName) }
-        val annotationExclusivityRules = rules
-            .filterIsInstance<AnnotationExclusivityRule>()
-            .filter { it.analyzeScope.includes(packageName) }
-        val interfaceNamingRules = rules
-            .filterIsInstance<InterfaceNamingRule>()
-            .filter { it.analyzeScope.includes(packageName) }
-        val classMetaAnnotationRules = rules
-            .filterIsInstance<ClassMetaAnnotationRule>()
-            .filter { it.analyzeScope.includes(packageName) }
-        val methodMetaAnnotationRules = rules
-            .filterIsInstance<MethodMetaAnnotationRule>()
-            .filter { it.analyzeScope.includes(packageName) }
+        val suffixRules = rules.filterIsInstance<ClassNameSuffixRule>()
+        val annotationRules = rules.filterIsInstance<ForbiddenAnnotationRule>()
+        val annotationExclusivityRules = rules.filterIsInstance<AnnotationExclusivityRule>()
+        val interfaceNamingRules = rules.filterIsInstance<InterfaceNamingRule>()
+        val classMetaAnnotationRules = rules.filterIsInstance<ClassMetaAnnotationRule>()
+        val methodMetaAnnotationRules = rules.filterIsInstance<MethodMetaAnnotationRule>()
+        val classConventionRules = rules.filterIsInstance<ClassConventionRule>()
 
         return object : JavaElementVisitor() {
             override fun visitImportStatement(statement: PsiImportStatement) {
@@ -133,6 +125,18 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             override fun visitClass(aClass: PsiClass) {
                 val nameIdentifier = aClass.nameIdentifier ?: return
                 val className = aClass.name ?: return
+                classConventionRules
+                    .filter { ClassSubjectEvaluator.matches(it, aClass, packageName) }
+                    .forEach { rule ->
+                        ClassSubjectEvaluator.violations(rule, aClass, packageName).forEach { detail ->
+                            val violation = ArchUnitViolation.ClassConvention(rule, detail)
+                            holder.registerProblem(
+                                nameIdentifier,
+                                violation.problemMessage(),
+                                *violation.quickFixes(),
+                            )
+                        }
+                    }
                 suffixRules
                     .firstOrNull { ClassSubjectEvaluator.isMissingRequiredSuffix(aClass, it) }
                     ?.let { rule ->
@@ -234,10 +238,11 @@ private data class ForbiddenDependencyMatch(
     val referenceKind: String,
 )
 
-private fun io.github.archunitlens.rules.LiveArchRule.isEnabledBy(
-    settings: io.github.archunitlens.settings.ArchUnitLensSettingsState,
+private fun LiveArchRule.isEnabledBy(
+    settings: ArchUnitLensSettingsState,
 ): Boolean = when (this) {
     is ClassNameSuffixRule -> settings.classNamingRulesEnabled
+    is ClassConventionRule -> predicate.isEnabledBy(settings) && condition.isEnabledBy(settings)
     is PackageDependencyBanRule -> settings.dependencyRulesEnabled
     is ForbiddenAnnotationRule,
     is AnnotationExclusivityRule,
@@ -245,4 +250,34 @@ private fun io.github.archunitlens.rules.LiveArchRule.isEnabledBy(
     is MethodMetaAnnotationRule,
     -> settings.annotationRulesEnabled
     is InterfaceNamingRule -> settings.interfaceRulesEnabled
+}
+
+private fun PredicateExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Boolean = when (this) {
+    PredicateExpr.All -> true
+    is PredicateExpr.Leaf -> false
+    is PredicateExpr.AreAnnotatedWith,
+    is PredicateExpr.AreNotAnnotatedWith,
+    -> settings.annotationRulesEnabled
+    is PredicateExpr.ResideInPackages,
+    is PredicateExpr.HaveSimpleNameEndingWith,
+    is PredicateExpr.HaveSimpleNameNotEndingWith,
+    -> settings.classNamingRulesEnabled
+    is PredicateExpr.AreInterfaces,
+    is PredicateExpr.AreEnums,
+    -> settings.interfaceRulesEnabled
+    is PredicateExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
+    is PredicateExpr.Or -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
+}
+
+private fun ConditionExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Boolean = when (this) {
+    is ConditionExpr.Leaf -> false
+    is ConditionExpr.BeAnnotatedWith -> settings.annotationRulesEnabled
+    is ConditionExpr.ResideInPackages,
+    is ConditionExpr.HaveSimpleNameEndingWith,
+    -> settings.classNamingRulesEnabled
+    is ConditionExpr.BeInterfaces,
+    is ConditionExpr.BeEnums,
+    is ConditionExpr.BeAssignableTo,
+    -> settings.interfaceRulesEnabled
+    is ConditionExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
 }

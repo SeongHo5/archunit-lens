@@ -23,6 +23,13 @@ sealed interface SubjectKind {
 sealed interface PredicateExpr {
     data object All : PredicateExpr
     data class Leaf(val predicate: String) : PredicateExpr
+    data class AreAnnotatedWith(val qualifiedName: String) : PredicateExpr
+    data class AreNotAnnotatedWith(val qualifiedName: String) : PredicateExpr
+    data class ResideInPackages(val patterns: List<String>) : PredicateExpr
+    data class HaveSimpleNameEndingWith(val suffix: String) : PredicateExpr
+    data class HaveSimpleNameNotEndingWith(val suffix: String) : PredicateExpr
+    data class AreInterfaces(val expected: Boolean) : PredicateExpr
+    data class AreEnums(val expected: Boolean) : PredicateExpr
     data class And(val left: PredicateExpr, val right: PredicateExpr) : PredicateExpr
     data class Or(val left: PredicateExpr, val right: PredicateExpr) : PredicateExpr
 }
@@ -32,6 +39,12 @@ sealed interface PredicateExpr {
  */
 sealed interface ConditionExpr {
     data class Leaf(val condition: String) : ConditionExpr
+    data class BeAnnotatedWith(val qualifiedName: String, val required: Boolean) : ConditionExpr
+    data class ResideInPackages(val patterns: List<String>) : ConditionExpr
+    data class HaveSimpleNameEndingWith(val suffix: String, val required: Boolean) : ConditionExpr
+    data class BeInterfaces(val required: Boolean) : ConditionExpr
+    data class BeEnums(val required: Boolean) : ConditionExpr
+    data class BeAssignableTo(val qualifiedName: String) : ConditionExpr
     data class And(val left: ConditionExpr, val right: ConditionExpr) : ConditionExpr
 }
 
@@ -50,6 +63,23 @@ sealed interface UnsupportedReason {
     data object UnsupportedMultiPackageRuleShape : UnsupportedReason
     data object CustomOrMetaAnnotationPredicates : UnsupportedReason
     data class UnsupportedEntryPoint(val entryPoint: String) : UnsupportedReason
+    data class InvalidArity(
+        val methodName: String,
+        val expected: String,
+        val actual: Int,
+    ) : UnsupportedReason
+
+    data class UnsupportedArgument(
+        val methodName: String,
+        val position: Int,
+        val kind: String,
+    ) : UnsupportedReason
+
+    data class UnresolvedSymbol(
+        val methodName: String,
+        val symbol: String,
+    ) : UnsupportedReason
+
     data object UnsupportedOrAmbiguousRuleChain : UnsupportedReason
 }
 

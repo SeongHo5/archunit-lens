@@ -1,5 +1,6 @@
 package io.github.archunitlens.inspections
 
+import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -762,6 +763,386 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testClassConventionReportsIndependentAndShouldViolations() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Mapper.java",
+            "package com.example; public @interface Mapper {}",
+        )
+        addArchitectureRulesFixture("classConventionMapper")
+        configureJavaFixture("BrokenAdapter.java", "javaSources/classConventions/BrokenAdapter.java")
+
+        val highlights = warningHighlights()
+        val warnings = highlights.mapNotNull { it.description }
+        assertEquals(3, warnings.size)
+        assertTrue(highlights.all { myFixture.file.text.substring(it.startOffset, it.endOffset) == "BrokenAdapter" })
+        assertTrue(warnings[0].contains(ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface")))
+        assertTrue(warnings[1].contains(ArchUnitLensBundle.message("inspection.problem.class.missingSuffix", "Mapper")))
+        assertTrue(warnings[2].contains(ArchUnitLensBundle.message("inspection.problem.class.missingAnnotation", "com.example.Mapper")))
+    }
+
+    fun testClassConventionRequiresEveryLeafFamilySetting() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Mapper.java",
+            "package com.example; public @interface Mapper {}",
+        )
+        addArchitectureRulesFixture("classConventionMapper")
+        configureJavaFixture("BrokenAdapter.java", "javaSources/classConventions/BrokenAdapter.java")
+        val state = service<ArchUnitLensSettings>().state
+        val originalNaming = state.classNamingRulesEnabled
+        val originalAnnotations = state.annotationRulesEnabled
+        val originalInterfaces = state.interfaceRulesEnabled
+        try {
+            state.classNamingRulesEnabled = true
+            state.annotationRulesEnabled = true
+            state.interfaceRulesEnabled = true
+            assertEquals(3, warningDescriptions().size)
+            listOf<(Boolean) -> Unit>(
+                { state.classNamingRulesEnabled = it },
+                { state.annotationRulesEnabled = it },
+                { state.interfaceRulesEnabled = it },
+            ).forEach { setEnabled ->
+                setEnabled(false)
+                configureJavaFixture("BrokenAdapter.java", "javaSources/classConventions/BrokenAdapter.java")
+                assertTrue(warningDescriptions().isEmpty())
+                setEnabled(true)
+                configureJavaFixture("BrokenAdapter.java", "javaSources/classConventions/BrokenAdapter.java")
+            }
+        } finally {
+            state.classNamingRulesEnabled = originalNaming
+            state.annotationRulesEnabled = originalAnnotations
+            state.interfaceRulesEnabled = originalInterfaces
+        }
+    }
+
+    fun testEveryClassConditionReportsOnlyViolatingDeclarationRange() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Required.java",
+            "package com.example; public @interface Required {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Forbidden.java",
+            "package com.example; public @interface Forbidden {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Base.java",
+            "package com.example; public class Base {}",
+        )
+        addArchitectureRulesFixture("classConventionConditionMatrix")
+
+        assertSingleClassWarning(
+            """
+                package com.example.case1;
+                @com.example.Required class GoodCase1 {}
+                class BadCase1 {}
+            """.trimIndent(),
+            "BadCase1",
+            ArchUnitLensBundle.message("inspection.problem.class.missingAnnotation", "com.example.Required"),
+        )
+        assertSingleClassWarning(
+            """
+                package com.example.case2;
+                class GoodCase2 {}
+                @com.example.Forbidden class BadCase2 {}
+            """.trimIndent(),
+            "BadCase2",
+            ArchUnitLensBundle.message("inspection.problem.class.forbiddenAnnotation", "com.example.Forbidden"),
+        )
+        assertNoClassWarning("package com.example.case3.required; class GoodCase3 {}")
+        assertSingleClassWarning(
+            "package com.example.case3; class BadCase3 {}",
+            "BadCase3",
+            ArchUnitLensBundle.message("inspection.problem.class.outsidePackages", "..required.."),
+        )
+        assertNoClassWarning("package com.example.case4.api; class GoodCase4 {}")
+        assertSingleClassWarning(
+            "package com.example.case4; class BadCase4 {}",
+            "BadCase4",
+            ArchUnitLensBundle.message("inspection.problem.class.outsidePackages", "..required.., ..api.."),
+        )
+        assertSingleClassWarning(
+            "package com.example.case5; class GoodService {} class BadCase5 {}",
+            "BadCase5",
+            ArchUnitLensBundle.message("inspection.problem.class.missingSuffix", "Service"),
+        )
+        assertSingleClassWarning(
+            "package com.example.case6; class GoodCase6 {} class BadCase6Impl {}",
+            "BadCase6Impl",
+            ArchUnitLensBundle.message("inspection.problem.class.forbiddenSuffix", "Impl"),
+        )
+        assertSingleClassWarning(
+            "package com.example.case7; interface GoodCase7 {} class BadCase7 {}",
+            "BadCase7",
+            ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface"),
+        )
+        assertSingleClassWarning(
+            "package com.example.case8; class GoodCase8 {} interface BadCase8 {}",
+            "BadCase8",
+            ArchUnitLensBundle.message("inspection.problem.class.mustNotBeInterface"),
+        )
+        assertSingleClassWarning(
+            "package com.example.case9; enum GoodCase9 { VALUE } class BadCase9 {}",
+            "BadCase9",
+            ArchUnitLensBundle.message("inspection.problem.class.mustBeEnum"),
+        )
+        assertSingleClassWarning(
+            "package com.example.case10; class GoodCase10 {} enum BadCase10 { VALUE }",
+            "BadCase10",
+            ArchUnitLensBundle.message("inspection.problem.class.mustNotBeEnum"),
+        )
+        assertSingleClassWarning(
+            """
+                package com.example.case11;
+                class GoodCase11 extends com.example.Base {}
+                class BadCase11 {}
+            """.trimIndent(),
+            "BadCase11",
+            ArchUnitLensBundle.message("inspection.problem.class.assignableTo", "com.example.Base"),
+        )
+    }
+
+    fun testSpringMapStructAndMyBatisClassConventions() {
+        addArchitectureRulesFixture("classConventionExamples")
+
+        configureJavaFixture("BrokenEndpoint.java", "javaSources/classConventions/BrokenEndpoint.java")
+        val springWarnings = warningDescriptions()
+        assertEquals(2, springWarnings.size)
+        assertTrue(springWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.missingSuffix", "Controller")) })
+        assertTrue(
+            springWarnings.any {
+                it.contains(
+                    ArchUnitLensBundle.message(
+                        "inspection.problem.class.missingAnnotation",
+                        "org.springframework.stereotype.Controller",
+                    ),
+                )
+            },
+        )
+
+        configureJavaFixture("OrderConverter.java", "javaSources/classConventions/OrderConverter.java")
+        val mapStructWarnings = warningDescriptions()
+        assertEquals(2, mapStructWarnings.size)
+        assertTrue(mapStructWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface")) })
+        assertTrue(
+            mapStructWarnings.any {
+                it.contains(ArchUnitLensBundle.message("inspection.problem.class.missingAnnotation", "org.mapstruct.Mapper"))
+            },
+        )
+
+        configureJavaFixture("BrokenRepository.java", "javaSources/classConventions/BrokenRepository.java")
+        val myBatisWarnings = warningDescriptions()
+        assertEquals(3, myBatisWarnings.size)
+        assertTrue(myBatisWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface")) })
+        assertTrue(myBatisWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.missingSuffix", "Mapper")) })
+        assertTrue(
+            myBatisWarnings.any {
+                it.contains(
+                    ArchUnitLensBundle.message(
+                        "inspection.problem.class.missingAnnotation",
+                        "org.apache.ibatis.annotations.Mapper",
+                    ),
+                )
+            },
+        )
+    }
+
+    fun testClassConventionPreservesAnalyzeScopeAndBecause() {
+        addArchitectureRulesFixture("classConventionScopeBecause")
+
+        configureJavaFixture("OrderServiceImpl.java", "javaSources/classConventions/OrderServiceImpl.java")
+        val warning = warningDescriptions().single()
+        assertTrue(warning.contains(ArchUnitLensBundle.message("inspection.problem.class.forbiddenSuffix", "Impl")))
+        assertTrue(warning.contains(ArchUnitLensBundle.message("inspection.problem.reason", "Implementations stay behind ports.")))
+
+        myFixture.configureByText(
+            "OutsideServiceImpl.java",
+            "package com.example.outside; class OutsideServiceImpl {}",
+        )
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testUnsupportedClassConditionSiblingProducesNoWarning() {
+        addArchitectureRulesFixture("classConventionUnsupportedSibling")
+        configureJavaFixture("BrokenAdapter.java", "javaSources/classConventions/BrokenAdapter.java")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testUnresolvedAssignableClassConditionProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest
+                    static final ArchRule unresolved = classes().that().areNotEnums()
+                            .should().beAssignableTo("com.example.Missing");
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Candidate.java", "package com.example; class Candidate {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testUnresolvedClassLiteralsInExactHandlersProduceNoWarning() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Custom.java",
+            """
+                package com.example;
+
+                @com.example.missing.Proxy
+                public @interface Custom {}
+            """.trimIndent(),
+        )
+        addArchitectureRulesFixture("exactUnresolvedClassLiterals")
+        myFixture.configureByText(
+            "BrokenMapper.java",
+            """
+                package com.example.domain;
+
+                @com.example.missing.Required
+                @com.example.missing.Forbidden
+                class BrokenMapper {}
+
+                @com.example.Custom
+                interface BrokenPort {
+                    @com.example.Custom
+                    void call();
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testClassConventionPredicateExclusionProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule service_enums = classes().that()
+                            .resideInAPackage("..service..")
+                            .should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Outside.java", "package com.example.web; class Outside {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testDynamicClassPredicateArgumentProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    static String dynamicPackage = "..service..";
+                    @ArchTest static final ArchRule dynamic_predicate = classes().that()
+                            .resideInAnyPackage("..api..", dynamicPackage)
+                            .should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Candidate.java", "package com.example.api; class Candidate {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testUnsupportedClassPackagePatternsProduceNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule invalid_middle_predicate = classes().that()
+                            .resideInAPackage("com..service").should().beEnums();
+                    @ArchTest static final ArchRule invalid_star_condition = classes().that().areNotEnums()
+                            .should().resideInAPackage("com.*.service");
+                    @ArchTest static final ArchRule invalid_middle_condition = classes().that().areNotEnums()
+                            .should().resideInAPackage("com..service");
+                    @ArchTest static final ArchRule invalid_any_condition = classes().that().areNotEnums()
+                            .should().resideInAnyPackage("com.*.service", "..allowed..");
+                }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText("Candidate.java", "package com.service; class Candidate {}")
+        assertTrue(warningDescriptions().isEmpty())
+        myFixture.configureByText("Outside.java", "package com.other; class Outside {}")
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testMalformedClassPredicateGrammarProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule consecutive = classes().that()
+                            .resideInAPackage("..service..").haveSimpleNameNotEndingWith("Never")
+                            .should().beEnums();
+                    @ArchTest static final ArchRule dangling_that = classes().that().should().beEnums();
+                    @ArchTest static final ArchRule dangling_and = classes().that()
+                            .resideInAPackage("..service..").and().should().beEnums();
+                    @ArchTest static final ArchRule dangling_or = classes().that()
+                            .resideInAPackage("..service..").or().should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Candidate.java", "package com.example.service; class Candidate {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testSelectorlessClassPredicateProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule selectorless = classes()
+                            .areNotEnums().should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Candidate.java", "package com.example; class Candidate {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testDeferredCodeAccessRulesProduceNoWarning() {
+        addArchitectureRulesFixture("deferredCodeAccess")
+        myFixture.configureByText(
+            "LegacyPrinter.java",
+            """
+                package com.example;
+
+                class LegacyPrinter {
+                    void print(Throwable failure) {
+                        System.out.println(failure.getMessage());
+                        failure.printStackTrace();
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
     private fun addPackageDependencyBanRule() {
         addArchitectureRulesFixture("packageDependencyBan")
     }
@@ -952,9 +1333,28 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         )
     }
 
-    private fun warningDescriptions(): List<String> = myFixture.doHighlighting()
-        .mapNotNull { it.description }
-        .filter { it.startsWith(problemMessage("")) }
+    private fun warningHighlights(): List<HighlightInfo> = myFixture.doHighlighting()
+        .filter { it.description?.startsWith(problemMessage("")) == true }
+
+    private fun warningDescriptions(): List<String> = warningHighlights().mapNotNull { it.description }
+
+    private fun assertSingleClassWarning(
+        code: String,
+        expectedIdentifier: String,
+        expectedDetail: String,
+    ) {
+        myFixture.configureByText("$expectedIdentifier.java", code)
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 1, warnings.size)
+        val warning = warnings.single()
+        assertTrue(warning.description.orEmpty().contains(expectedDetail))
+        assertEquals(expectedIdentifier, myFixture.file.text.substring(warning.startOffset, warning.endOffset))
+    }
+
+    private fun assertNoClassWarning(code: String) {
+        myFixture.configureByText("Compliant.java", code)
+        assertTrue(warningHighlights().isEmpty())
+    }
 
     private fun problemMessage(ruleName: String): String = ArchUnitLensBundle.message("inspection.problem.message", ruleName)
 
