@@ -1,5 +1,17 @@
 # ArchUnit Lens Changelog
 
+## Unreleased
+
+### Added
+
+- Added live Java class conventions for annotation, package, suffix, interface, enum, and resolvable assignability leaves.
+- Added left-associative class predicate `and()` / `or()` and independent `andShould()` condition evaluation when the full tree is statically supported.
+- Added Spring, MapStruct, and MyBatis convention coverage plus metadata-only proof for deferred method/constructor and code-access rules.
+
+### Fixed
+
+- Preserved receiver-only ArchUnit call chains and ordered argument kinds so dynamic or helper-backed arguments cannot be partially interpreted.
+
 ## [0.1.3] - 2026-07-08
 
 Patch release that republishes the 0.1.2 plugin updates under a new immutable Marketplace version.

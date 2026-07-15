@@ -40,7 +40,7 @@ static final ArchRule mapperAnnotationMustBeExclusive =
         .because("Mapper annotations must be exclusive.");
 ```
 
-## 0.1.3 support scope
+## Current support scope
 
 ArchUnit Lens supports only statically provable Java rule-field patterns. Unsupported or ambiguous DSL chains are retained as Rule Overview metadata when possible and never produce live warnings. The canonical support reference is [`docs/rule-support-matrix.md`](docs/rule-support-matrix.md).
 
@@ -50,6 +50,8 @@ The initial live-warning subset includes:
 - class suffix rules
 - forbidden annotations
 - annotation exclusivity
+- static class conventions for positive/negative annotations, single/any package patterns, suffix/not-suffix, interface/non-interface, and enum/non-enum checks
+- left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
 - literal class and method meta-annotation rules
 - `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
@@ -77,7 +79,9 @@ ArchUnit Lens does not execute ArchUnit rules or user/project code. It intention
 - unused wildcard import statements without a resolved referenced class
 - unresolved dependency references; resolve failures intentionally produce no warning
 - arbitrary method/member subject rules beyond the literal meta-annotation subset
-- arbitrary boolean predicate/condition tree evaluation
+- method/constructor declaration conventions tracked by issue #24
+- body-level `callMethod(...)` and `accessField(...)` checks; the current decision is documented in [`docs/issue-25-code-access-decision.md`](docs/issue-25-code-access-decision.md)
+- condition `orShould()` and any boolean tree containing a custom, dynamic, helper-backed, or unresolved leaf
 
 ## Settings
 
