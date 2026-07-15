@@ -50,6 +50,23 @@ sealed interface UnsupportedReason {
     data object UnsupportedMultiPackageRuleShape : UnsupportedReason
     data object CustomOrMetaAnnotationPredicates : UnsupportedReason
     data class UnsupportedEntryPoint(val entryPoint: String) : UnsupportedReason
+    data class InvalidArity(
+        val methodName: String,
+        val expected: String,
+        val actual: Int,
+    ) : UnsupportedReason
+
+    data class UnsupportedArgument(
+        val methodName: String,
+        val position: Int,
+        val kind: String,
+    ) : UnsupportedReason
+
+    data class UnresolvedSymbol(
+        val methodName: String,
+        val symbol: String,
+    ) : UnsupportedReason
+
     data object UnsupportedOrAmbiguousRuleChain : UnsupportedReason
 }
 

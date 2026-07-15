@@ -220,6 +220,23 @@ internal object ArchUnitLensRuleOverviewFormatter {
             "overview.unsupported.customOrMetaAnnotationPredicates",
         )
         is UnsupportedReason.UnsupportedEntryPoint -> ArchUnitLensBundle.message("overview.unsupported.entryPoint", entryPoint)
+        is UnsupportedReason.InvalidArity -> ArchUnitLensBundle.message(
+            "overview.unsupported.invalidArity",
+            methodName,
+            expected,
+            actual,
+        )
+        is UnsupportedReason.UnsupportedArgument -> ArchUnitLensBundle.message(
+            "overview.unsupported.argument",
+            methodName,
+            position + 1,
+            kind,
+        )
+        is UnsupportedReason.UnresolvedSymbol -> ArchUnitLensBundle.message(
+            "overview.unsupported.unresolved",
+            methodName,
+            symbol,
+        )
         UnsupportedReason.UnsupportedOrAmbiguousRuleChain -> ArchUnitLensBundle.message("overview.unsupported.ambiguous")
     }
 

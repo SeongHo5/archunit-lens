@@ -4,6 +4,22 @@ import com.intellij.psi.PsiExpression
 import com.intellij.psi.PsiImportStatement
 import com.intellij.psi.PsiJavaFile
 
+internal enum class ExactHandlerFamily {
+    PACKAGE_DEPENDENCY_BAN,
+    CLASS_NAME_SUFFIX,
+    FORBIDDEN_ANNOTATION,
+    ANNOTATION_EXCLUSIVITY,
+    INTERFACE_NAMING,
+    CLASS_META_ANNOTATION,
+    METHOD_META_ANNOTATION,
+}
+
+internal sealed interface ExactHandlerDecision {
+    data class Matched(val rule: LiveArchRule) : ExactHandlerDecision
+    data class Unsupported(val reason: UnsupportedReason) : ExactHandlerDecision
+    data object NotApplicable : ExactHandlerDecision
+}
+
 /**
  * Converts supported Java ArchUnit DSL method chains into live inspection rules.
  *
@@ -18,29 +34,71 @@ object ArchRuleParser {
     }
 
     private object RuleNormalizer {
-        private val handlers = listOf(
-            ::parsePackageDependencyBan,
-            ::parseClassNameSuffix,
-            ::parseForbiddenAnnotation,
-            ::parseAnnotationExclusivity,
-            ::parseInterfaceNaming,
-            ::parseClassMetaAnnotation,
-            ::parseMethodMetaAnnotation,
-        )
-
         fun normalize(
             source: ArchRuleSource,
             calls: List<RawCall>,
-        ): DiscoveredArchRule {
-            val liveRule = handlers.firstNotNullOfOrNull { it(source, calls) }
-
-            return DiscoveredArchRule(
+        ): DiscoveredArchRule = when (val decision = routeExactHandlers(source, calls) { ExactHandlerDecision.NotApplicable }) {
+            is ExactHandlerDecision.Matched -> DiscoveredArchRule(
                 ruleName = source.ruleName,
-                descriptor = liveRule?.toDescriptor(calls, source)
-                    ?: unsupportedDescriptor(source, calls),
-                liveRule = liveRule,
+                descriptor = decision.rule.toDescriptor(calls, source),
+                liveRule = decision.rule,
+            )
+            is ExactHandlerDecision.Unsupported -> DiscoveredArchRule(
+                ruleName = source.ruleName,
+                descriptor = unsupportedDescriptor(source, calls, decision.reason),
+                liveRule = null,
+            )
+            ExactHandlerDecision.NotApplicable -> DiscoveredArchRule(
+                ruleName = source.ruleName,
+                descriptor = unsupportedDescriptor(source, calls),
+                liveRule = null,
             )
         }
+    }
+
+    internal fun routeExactHandlers(
+        source: ArchRuleSource,
+        calls: List<RawCall>,
+        fallback: () -> ExactHandlerDecision,
+    ): ExactHandlerDecision {
+        ExactHandlerFamily.entries.forEach { family ->
+            when (val decision = classifyExactHandler(family, source, calls)) {
+                ExactHandlerDecision.NotApplicable -> Unit
+                else -> return decision
+            }
+        }
+        return fallback()
+    }
+
+    internal fun classifyExactHandler(
+        family: ExactHandlerFamily,
+        source: ArchRuleSource,
+        calls: List<RawCall>,
+    ): ExactHandlerDecision {
+        if (!family.owns(calls)) return ExactHandlerDecision.NotApplicable
+        calls.validateStaticArguments()?.let { reason ->
+            val stableReason = if (
+                family == ExactHandlerFamily.CLASS_META_ANNOTATION ||
+                family == ExactHandlerFamily.METHOD_META_ANNOTATION
+            ) {
+                UnsupportedReason.CustomOrMetaAnnotationPredicates
+            } else {
+                reason
+            }
+            return ExactHandlerDecision.Unsupported(stableReason)
+        }
+
+        val rule = when (family) {
+            ExactHandlerFamily.PACKAGE_DEPENDENCY_BAN -> parsePackageDependencyBan(source, calls)
+            ExactHandlerFamily.CLASS_NAME_SUFFIX -> parseClassNameSuffix(source, calls)
+            ExactHandlerFamily.FORBIDDEN_ANNOTATION -> parseForbiddenAnnotation(source, calls)
+            ExactHandlerFamily.ANNOTATION_EXCLUSIVITY -> parseAnnotationExclusivity(source, calls)
+            ExactHandlerFamily.INTERFACE_NAMING -> parseInterfaceNaming(source, calls)
+            ExactHandlerFamily.CLASS_META_ANNOTATION -> parseClassMetaAnnotation(source, calls)
+            ExactHandlerFamily.METHOD_META_ANNOTATION -> parseMethodMetaAnnotation(source, calls)
+        }
+        return rule?.let(ExactHandlerDecision::Matched)
+            ?: ExactHandlerDecision.Unsupported(calls.unresolvedReason())
     }
 
     private fun parsePackageDependencyBan(
@@ -264,9 +322,120 @@ object ArchRuleParser {
         )
     }
 
+    private fun ExactHandlerFamily.owns(calls: List<RawCall>): Boolean {
+        val shouldIndex = calls.indexOfFirst { it.name == "should" }
+        if (shouldIndex < 0) return false
+        val predicateNames = calls.take(shouldIndex).map { it.name }
+        val conditionNames = calls.drop(shouldIndex + 1).map { it.name }.withoutTrailingBecause()
+        return when (this) {
+            ExactHandlerFamily.PACKAGE_DEPENDENCY_BAN ->
+                (
+                    predicateNames in listOf(
+                        listOf("noClasses", "that", "resideInAPackage"),
+                        listOf("noClasses", "that", "resideInAnyPackage"),
+                    ) &&
+                        conditionNames in listOf(
+                            listOf("dependOnClassesThat", "resideInAPackage"),
+                            listOf("dependOnClassesThat", "resideInAnyPackage"),
+                        )
+                    )
+            ExactHandlerFamily.CLASS_NAME_SUFFIX -> predicateNames == listOf("classes", "that", "resideInAPackage") &&
+                conditionNames == listOf("haveSimpleNameEndingWith")
+            ExactHandlerFamily.FORBIDDEN_ANNOTATION -> predicateNames == listOf("noClasses", "that", "resideInAPackage") &&
+                conditionNames == listOf("beAnnotatedWith")
+            ExactHandlerFamily.ANNOTATION_EXCLUSIVITY -> predicateNames == listOf("classes", "that", "areAnnotatedWith") &&
+                conditionNames == listOf("notBeAnnotatedWith")
+            ExactHandlerFamily.INTERFACE_NAMING -> predicateNames == listOf("classes", "that", "haveSimpleNameEndingWith") &&
+                conditionNames == listOf("beInterfaces", "andShould", "beAssignableTo")
+            ExactHandlerFamily.CLASS_META_ANNOTATION -> predicateNames == listOf("classes", "that", "areInterfaces") &&
+                conditionNames == listOf("notBeMetaAnnotatedWith")
+            ExactHandlerFamily.METHOD_META_ANNOTATION ->
+                predicateNames == listOf("methods", "that", "areDeclaredInClassesThat", "areInterfaces") &&
+                    conditionNames == listOf("notBeMetaAnnotatedWith")
+        }
+    }
+
+    private fun List<RawCall>.validateStaticArguments(): UnsupportedReason? {
+        for (call in this) {
+            val expectation = when (call.name) {
+                "classes", "noClasses", "methods", "that", "should", "andShould", "dependOnClassesThat",
+                "areInterfaces", "beInterfaces", "areDeclaredInClassesThat",
+                -> ArgumentExpectation.None
+                "resideInAnyPackage" -> ArgumentExpectation.Strings(minimum = 1)
+                "resideInAPackage", "haveSimpleNameEndingWith", "because" -> ArgumentExpectation.Strings(exact = 1)
+                "areAnnotatedWith", "beAnnotatedWith", "notBeAnnotatedWith", "notBeMetaAnnotatedWith", "beAssignableTo" ->
+                    ArgumentExpectation.Annotation(exact = 1)
+                else -> continue
+            }
+            expectation.validate(call)?.let { return it }
+        }
+        return null
+    }
+
+    private sealed interface ArgumentExpectation {
+        fun validate(call: RawCall): UnsupportedReason?
+
+        data object None : ArgumentExpectation {
+            override fun validate(call: RawCall): UnsupportedReason? = if (call.arguments.isEmpty()) {
+                null
+            } else {
+                UnsupportedReason.InvalidArity(call.name, "0", call.arguments.size)
+            }
+        }
+
+        data class Strings(
+            val exact: Int? = null,
+            val minimum: Int? = null,
+        ) : ArgumentExpectation {
+            override fun validate(call: RawCall): UnsupportedReason? {
+                val expected = exact?.toString() ?: "at least $minimum"
+                if (exact != null && call.arguments.size != exact) {
+                    return UnsupportedReason.InvalidArity(call.name, expected, call.arguments.size)
+                }
+                if (minimum != null && call.arguments.size < minimum) {
+                    return UnsupportedReason.InvalidArity(call.name, expected, call.arguments.size)
+                }
+                val unsupported = call.arguments.firstOrNull { it !is RawArgument.StringLiteral }
+                return unsupported?.let { UnsupportedReason.UnsupportedArgument(call.name, it.position, it.kindName()) }
+            }
+        }
+
+        data class Annotation(val exact: Int) : ArgumentExpectation {
+            override fun validate(call: RawCall): UnsupportedReason? {
+                if (call.arguments.size != exact) {
+                    return UnsupportedReason.InvalidArity(call.name, exact.toString(), call.arguments.size)
+                }
+                val unsupported = call.arguments.firstOrNull {
+                    it !is RawArgument.StringLiteral && it !is RawArgument.ClassLiteral
+                }
+                return unsupported?.let { UnsupportedReason.UnsupportedArgument(call.name, it.position, it.kindName()) }
+            }
+        }
+    }
+
+    private fun RawArgument.kindName(): String = when (this) {
+        is RawArgument.StringLiteral -> "string literal"
+        is RawArgument.ClassLiteral -> "class literal"
+        is RawArgument.Reference -> "dynamic reference"
+        is RawArgument.NestedCall -> "helper call"
+        is RawArgument.Lambda -> "lambda"
+        is RawArgument.CustomExpression -> "custom expression"
+    }
+
+    private fun List<RawCall>.unresolvedReason(): UnsupportedReason {
+        val call = firstOrNull { rawCall -> rawCall.arguments.any { it is RawArgument.ClassLiteral } }
+        val symbol = call?.classLiteralArgs?.firstOrNull()
+        return if (call != null && symbol != null) {
+            UnsupportedReason.UnresolvedSymbol(call.name, symbol)
+        } else {
+            UnsupportedReason.UnsupportedOrAmbiguousRuleChain
+        }
+    }
+
     private fun unsupportedDescriptor(
         source: ArchRuleSource,
         calls: List<RawCall>,
+        reason: UnsupportedReason = calls.unsupportedReason(),
     ): RuleDescriptor = RuleDescriptor(
         subject = calls.subjectKind(),
         sourcePointer = source.fieldPointer,
@@ -275,7 +444,7 @@ object ArchRuleParser {
             ?: PredicateExpr.Leaf(calls.takeUntilShould().joinToString(".") { it.name }.ifBlank { "unknown" }),
         condition = ConditionExpr.Leaf(calls.dropAfterShould().joinToString(".") { it.name }.ifBlank { "unknown" }),
         reason = calls.reason(),
-        supportStatus = SupportStatus.Unsupported(calls.unsupportedReason()),
+        supportStatus = SupportStatus.Unsupported(reason),
     )
 
     private fun LiveArchRule.toDescriptor(

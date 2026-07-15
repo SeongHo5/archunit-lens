@@ -709,6 +709,144 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertNull(ArchRuleParser.discover(source)?.liveRule)
     }
 
+    fun testEveryExactHandlerClassifiesOwnedForeignAndMalformedShapes() {
+        val cases = exactHandlerCases()
+        cases.forEachIndexed { index, (family, code) ->
+            val source = findSingleSource(code)
+            val calls = RawCallExtractor.from(source.initializer)
+
+            assertTrue(
+                "$family should match its valid shape",
+                ArchRuleParser.classifyExactHandler(family, source, calls) is ExactHandlerDecision.Matched,
+            )
+            val foreignFamily = cases[(index + 1) % cases.size].first
+            assertEquals(
+                ExactHandlerDecision.NotApplicable,
+                ArchRuleParser.classifyExactHandler(foreignFamily, source, calls),
+            )
+            val malformedCalls = calls.toMutableList().also { malformed ->
+                malformed[0] = malformed[0].copy(arguments = listOf(RawArgument.Reference(0, "dynamic")))
+            }
+            assertTrue(
+                "$family should own and reject malformed arity",
+                ArchRuleParser.classifyExactHandler(family, source, malformedCalls) is ExactHandlerDecision.Unsupported,
+            )
+        }
+    }
+
+    fun testAggregateRouteRunsFallbackOnlyAfterAllExactHandlersDecline() {
+        val exactSource = findSingleSource(exactHandlerCases().first().second)
+        val exactCalls = RawCallExtractor.from(exactSource.initializer)
+        var fallbackCalls = 0
+
+        assertTrue(
+            ArchRuleParser.routeExactHandlers(exactSource, exactCalls) {
+                fallbackCalls++
+                ExactHandlerDecision.NotApplicable
+            } is ExactHandlerDecision.Matched,
+        )
+        assertEquals(0, fallbackCalls)
+
+        val malformedCalls = exactCalls.toMutableList().also { malformed ->
+            val packageCallIndex = malformed.indexOfFirst { it.name == "resideInAPackage" }
+            malformed[packageCallIndex] = malformed[packageCallIndex].copy(
+                arguments = listOf(
+                    RawArgument.StringLiteral(0, "..domain.."),
+                    RawArgument.Reference(1, "dynamicPackage"),
+                ),
+            )
+        }
+        assertTrue(
+            ArchRuleParser.routeExactHandlers(exactSource, malformedCalls) {
+                fallbackCalls++
+                ExactHandlerDecision.NotApplicable
+            } is ExactHandlerDecision.Unsupported,
+        )
+        assertEquals(0, fallbackCalls)
+
+        val fallbackSource = findSingleSource(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule rule = classes().should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        assertEquals(
+            ExactHandlerDecision.NotApplicable,
+            ArchRuleParser.routeExactHandlers(fallbackSource, RawCallExtractor.from(fallbackSource.initializer)) {
+                fallbackCalls++
+                ExactHandlerDecision.NotApplicable
+            },
+        )
+        assertEquals(1, fallbackCalls)
+    }
+
+    fun testMixedLiteralAndDynamicExactArgumentsStayMetadataOnly() {
+        val discovered = discoverSingleRule(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    static String dynamicPackage = "..adapter..";
+                    @ArchTest static final ArchRule rule = noClasses().that()
+                            .resideInAnyPackage("..domain..", dynamicPackage)
+                            .should().dependOnClassesThat().resideInAPackage("..adapter..");
+                }
+            """.trimIndent(),
+        )
+
+        assertNull(discovered.liveRule)
+        val status = discovered.descriptor.supportStatus as SupportStatus.Unsupported
+        assertTrue(status.reason is UnsupportedReason.UnsupportedArgument)
+    }
+
+    private fun exactHandlerCases(): List<Pair<ExactHandlerFamily, String>> = listOf(
+        ExactHandlerFamily.PACKAGE_DEPENDENCY_BAN to exactRule(
+            "noClasses().that().resideInAPackage(\"..domain..\").should().dependOnClassesThat().resideInAPackage(\"..adapter..\")",
+            "noClasses",
+        ),
+        ExactHandlerFamily.CLASS_NAME_SUFFIX to exactRule(
+            "classes().that().resideInAPackage(\"..service..\").should().haveSimpleNameEndingWith(\"Service\")",
+            "classes",
+        ),
+        ExactHandlerFamily.FORBIDDEN_ANNOTATION to exactRule(
+            "noClasses().that().resideInAPackage(\"..domain..\").should().beAnnotatedWith(com.example.Service.class)",
+            "noClasses",
+        ),
+        ExactHandlerFamily.ANNOTATION_EXCLUSIVITY to exactRule(
+            "classes().that().areAnnotatedWith(\"com.example.Mapper\").should().notBeAnnotatedWith(\"com.example.Secondary\")",
+            "classes",
+        ),
+        ExactHandlerFamily.INTERFACE_NAMING to exactRule(
+            "classes().that().haveSimpleNameEndingWith(\"Mapper\").should().beInterfaces().andShould().beAssignableTo(\"com.example.Mapper\")",
+            "classes",
+        ),
+        ExactHandlerFamily.CLASS_META_ANNOTATION to exactRule(
+            "classes().that().areInterfaces().should().notBeMetaAnnotatedWith(\"com.example.Proxy\")",
+            "classes",
+        ),
+        ExactHandlerFamily.METHOD_META_ANNOTATION to exactRule(
+            "methods().that().areDeclaredInClassesThat().areInterfaces().should().notBeMetaAnnotatedWith(\"com.example.Proxy\")",
+            "methods",
+        ),
+    )
+
+    private fun exactRule(
+        initializer: String,
+        entryPoint: String,
+    ): String = """
+        import com.tngtech.archunit.junit.ArchTest;
+        import com.tngtech.archunit.lang.ArchRule;
+        import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.$entryPoint;
+        class ArchitectureRules {
+            @ArchTest static final ArchRule rule = $initializer;
+        }
+    """.trimIndent()
+
     private fun parseSingleRule(code: String): LiveArchRule {
         val source = findSingleSource(code)
         return ArchRuleParser.discover(source)?.liveRule ?: error("Expected supported ArchUnit Lens rule")
