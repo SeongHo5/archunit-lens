@@ -189,17 +189,16 @@ private class ArchUnitLensRuleOverviewPanel(
         val service = project.service<ArchRuleProjectService>()
         val currentPackage = packageNameForJavaFile(project, request.selectedFile)
         val filter = request.toFilter(currentPackage)
-        val discoveries = if (request.currentFileOnly && currentPackage != null) {
-            service.discoveriesForPackage(currentPackage)
-        } else {
-            service.discoveries()
-        }.map { it.toOverviewItem() }
+        val discoverySnapshot = service.discoverySnapshot(
+            packageName = currentPackage?.takeIf { request.currentFileOnly },
+        )
+        val discoveries = discoverySnapshot.discoveries.map { it.toOverviewItem() }
         return RuleOverviewSnapshot(
             currentPackage = currentPackage,
             visibleDiscoveries = ArchUnitLensRuleOverviewFormatter.filteredDiscoveries(discoveries, filter),
             overviewText = ArchUnitLensRuleOverviewFormatter.render(
                 discoveries = discoveries,
-                metrics = service.scanMetrics(),
+                metrics = discoverySnapshot.scanMetrics,
                 filter = filter,
             ),
         )

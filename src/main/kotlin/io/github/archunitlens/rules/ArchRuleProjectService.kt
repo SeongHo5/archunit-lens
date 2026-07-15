@@ -1,6 +1,7 @@
 package io.github.archunitlens.rules
 
 import com.intellij.ide.highlighter.JavaFileType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -14,7 +15,9 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiSearchHelper
 import com.intellij.psi.search.UsageSearchContext
 import com.intellij.psi.util.PsiModificationTracker
+import com.intellij.util.concurrency.annotations.RequiresReadLock
 import io.github.archunitlens.settings.ArchUnitLensSettings
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Project-level rule index backed by indexed candidate lookup and per-rule-file text stamps.
@@ -27,72 +30,122 @@ import io.github.archunitlens.settings.ArchUnitLensSettings
  */
 @Service(Service.Level.PROJECT)
 class ArchRuleProjectService(private val project: Project) {
-    private var cachedModificationCount: Long = -1
-    private var cachedDiscoverySettingsFingerprint: String = ""
-    private var cachedDiscoveries: List<DiscoveredArchRule> = emptyList()
-    private var cachedRuleFiles: Map<String, CachedRuleFileDiscoveries> = emptyMap()
-    private var cachedPackageLookupModificationCount: Long = -1
-    private var cachedPackageDiscoveries: Map<String, List<DiscoveredArchRule>> = emptyMap()
-    private var packageLookupCacheHits = 0
-    private var packageLookupCacheMisses = 0
-    private var latestScanMetrics = ArchRuleScanMetrics()
+    private val cache = AtomicReference(ArchRuleCacheSnapshot())
 
-    fun rulesForPackage(packageName: String): List<LiveArchRule> = discoveriesForPackage(packageName).mapNotNull { it.liveRule }
+    /**
+     * Returns live rules that apply to [packageName]. The caller must hold an IntelliJ read action.
+     */
+    @RequiresReadLock
+    fun rulesForPackage(packageName: String): List<LiveArchRule> = discoverySnapshot(packageName).discoveries.mapNotNull { it.liveRule }
 
-    fun discoveriesForPackage(packageName: String): List<DiscoveredArchRule> {
-        discoveries()
-        val currentModificationCount = PsiModificationTracker.getInstance(project).modificationCount
-        clearPackageLookupCacheIfNeeded(currentModificationCount)
+    /**
+     * Returns discovered rules that apply to [packageName]. The caller must hold an IntelliJ read action.
+     */
+    @RequiresReadLock
+    fun discoveriesForPackage(packageName: String): List<DiscoveredArchRule> = discoverySnapshot(packageName).discoveries
 
-        cachedPackageDiscoveries[packageName]?.let { cached ->
-            packageLookupCacheHits++
-            updatePackageLookupMetrics()
-            return cached
+    /**
+     * Returns all discovered rules. The caller must hold an IntelliJ read action.
+     */
+    @RequiresReadLock
+    fun discoveries(): List<DiscoveredArchRule> = discoverySnapshot().discoveries
+
+    /**
+     * Returns the most recently published immutable cache metrics without accessing PSI or indexes.
+     */
+    internal fun scanMetrics(): ArchRuleScanMetrics = cache.get().scanMetrics
+
+    @RequiresReadLock
+    internal fun discoverySnapshot(packageName: String? = null): ArchRuleDiscoverySnapshot {
+        ApplicationManager.getApplication().assertReadAccessAllowed()
+        val snapshot = currentDiscoverySnapshot()
+        return if (packageName == null) {
+            snapshot.toDiscoverySnapshot()
+        } else {
+            packageDiscoverySnapshot(packageName)
         }
-
-        packageLookupCacheMisses++
-        val filteredDiscoveries = cachedDiscoveries.filter { it.appliesToPackage(packageName) }
-        cachedPackageDiscoveries = cachedPackageDiscoveries + (packageName to filteredDiscoveries)
-        updatePackageLookupMetrics()
-        return filteredDiscoveries
     }
 
-    internal fun scanMetrics(): ArchRuleScanMetrics = latestScanMetrics
-
-    fun discoveries(): List<DiscoveredArchRule> {
-        val currentModificationCount = PsiModificationTracker.getInstance(project).modificationCount
-        val settingsFingerprint = discoverySettingsFingerprint()
-        if (
-            currentModificationCount == cachedModificationCount &&
-            settingsFingerprint == cachedDiscoverySettingsFingerprint
-        ) {
-            return cachedDiscoveries
-        }
-
-        clearPackageLookupCache(currentModificationCount)
-        if (DumbService.isDumb(project)) {
-            latestScanMetrics = latestScanMetrics.copy(
-                indexingStatus = ArchRuleIndexingStatus.INDEXING,
-                staleCacheFallback = cachedModificationCount >= 0,
-                packageLookupCacheEntries = cachedPackageDiscoveries.size,
-                packageLookupCacheHits = packageLookupCacheHits,
-                packageLookupCacheMisses = packageLookupCacheMisses,
-            )
-            logMetrics {
-                "ArchUnit Lens scan deferred during indexing: " +
-                    "staleCacheFallback=${latestScanMetrics.staleCacheFallback}, " +
-                    "cachedRules=${cachedDiscoveries.size}"
+    private fun currentDiscoverySnapshot(): ArchRuleCacheSnapshot {
+        while (true) {
+            val cachedSnapshot = cache.get()
+            val currentModificationCount = PsiModificationTracker.getInstance(project).modificationCount
+            val settingsFingerprint = discoverySettingsFingerprint()
+            if (
+                currentModificationCount == cachedSnapshot.modificationCount &&
+                settingsFingerprint == cachedSnapshot.discoverySettingsFingerprint
+            ) {
+                return cachedSnapshot
             }
-            return cachedDiscoveries
-        }
 
-        cachedDiscoveries = collectDiscoveries()
-        cachedModificationCount = currentModificationCount
-        cachedDiscoverySettingsFingerprint = settingsFingerprint
-        return cachedDiscoveries
+            val nextSnapshot = if (DumbService.isDumb(project)) {
+                val clearedSnapshot = cachedSnapshot.clearPackageLookupCache(currentModificationCount)
+                clearedSnapshot.copy(
+                    scanMetrics = clearedSnapshot.scanMetrics.withPackageLookupMetrics(
+                        indexingStatus = ArchRuleIndexingStatus.INDEXING,
+                        staleCacheFallback = cachedSnapshot.modificationCount >= 0,
+                    ),
+                ).also { snapshot ->
+                    logMetrics {
+                        "ArchUnit Lens scan deferred during indexing: " +
+                            "staleCacheFallback=${snapshot.scanMetrics.staleCacheFallback}, " +
+                            "cachedRules=${snapshot.discoveries.size}"
+                    }
+                }
+            } else {
+                val discoveryResult = collectDiscoveries(
+                    cachedRuleFiles = cachedSnapshot.ruleFiles,
+                    excludedPathFragments = excludedPathFragments(settingsFingerprint),
+                )
+                ArchRuleCacheSnapshot(
+                    modificationCount = currentModificationCount,
+                    discoverySettingsFingerprint = settingsFingerprint,
+                    discoveries = discoveryResult.discoveries,
+                    ruleFiles = discoveryResult.ruleFiles,
+                    packageLookupModificationCount = currentModificationCount,
+                    scanMetrics = discoveryResult.scanMetrics,
+                )
+            }
+            if (cache.compareAndSet(cachedSnapshot, nextSnapshot)) {
+                return nextSnapshot
+            }
+        }
     }
 
-    private fun collectDiscoveries(): List<DiscoveredArchRule> {
+    private fun packageDiscoverySnapshot(packageName: String): ArchRuleDiscoverySnapshot {
+        while (true) {
+            val cachedSnapshot = cache.get()
+            val currentModificationCount = PsiModificationTracker.getInstance(project).modificationCount
+            val packageCacheSnapshot = if (
+                currentModificationCount == cachedSnapshot.packageLookupModificationCount
+            ) {
+                cachedSnapshot
+            } else {
+                cachedSnapshot.clearPackageLookupCache(currentModificationCount)
+            }
+            val cachedDiscoveries = packageCacheSnapshot.packageDiscoveries[packageName]
+            val nextSnapshot = if (cachedDiscoveries != null) {
+                packageCacheSnapshot.copy(
+                    packageLookupCacheHits = packageCacheSnapshot.packageLookupCacheHits + 1,
+                ).withUpdatedPackageLookupMetrics()
+            } else {
+                val filteredDiscoveries = packageCacheSnapshot.discoveries
+                    .filter { it.appliesToPackage(packageName) }
+                packageCacheSnapshot.copy(
+                    packageDiscoveries = packageCacheSnapshot.packageDiscoveries + (packageName to filteredDiscoveries),
+                    packageLookupCacheMisses = packageCacheSnapshot.packageLookupCacheMisses + 1,
+                ).withUpdatedPackageLookupMetrics()
+            }
+            if (cache.compareAndSet(cachedSnapshot, nextSnapshot)) {
+                return nextSnapshot.toDiscoverySnapshot(packageName)
+            }
+        }
+    }
+
+    private fun collectDiscoveries(
+        cachedRuleFiles: Map<String, CachedRuleFileDiscoveries>,
+        excludedPathFragments: List<String>,
+    ): ArchRuleDiscoveryResult {
         val startedAt = System.nanoTime()
         val psiManager = PsiManager.getInstance(project)
         val projectFileIndex = ProjectFileIndex.getInstance(project)
@@ -101,7 +154,7 @@ class ArchRuleProjectService(private val project: Project) {
         var parsedCandidateFileCount = 0
         var ruleSourceCount = 0
         val nextRuleFiles = mutableMapOf<String, CachedRuleFileDiscoveries>()
-        val rules = indexedArchTestJavaFiles(projectFileIndex)
+        val rules = indexedArchTestJavaFiles(projectFileIndex, excludedPathFragments)
             .asSequence()
             .mapNotNull { psiManager.findFile(it) as? PsiJavaFile }
             .onEach { indexedJavaCandidateFileCount++ }
@@ -132,9 +185,8 @@ class ArchRuleProjectService(private val project: Project) {
                 ruleFileDiscoveries.asSequence()
             }
             .toList()
-        cachedRuleFiles = nextRuleFiles
         val durationMs = (System.nanoTime() - startedAt) / NANOS_PER_MILLISECOND
-        latestScanMetrics = ArchRuleScanMetrics(
+        val scanMetrics = ArchRuleScanMetrics(
             indexedJavaCandidateFiles = indexedJavaCandidateFileCount,
             archRuleCandidateFiles = candidateFileCount,
             parsedRuleCandidateFiles = parsedCandidateFileCount,
@@ -142,32 +194,32 @@ class ArchRuleProjectService(private val project: Project) {
             supportedRules = rules.count { it.liveRule != null },
             unsupportedRules = rules.count { it.liveRule == null },
             durationMs = durationMs,
-            packageLookupCacheEntries = cachedPackageDiscoveries.size,
-            packageLookupCacheHits = packageLookupCacheHits,
-            packageLookupCacheMisses = packageLookupCacheMisses,
             indexingStatus = ArchRuleIndexingStatus.SMART,
             staleCacheFallback = false,
         )
         logMetrics {
-            "ArchUnit Lens scan completed: indexedJavaCandidateFiles=${latestScanMetrics.indexedJavaCandidateFiles}, " +
-                "archRuleCandidateFiles=${latestScanMetrics.archRuleCandidateFiles}, " +
-                "parsedRuleCandidateFiles=${latestScanMetrics.parsedRuleCandidateFiles}, " +
-                "archRuleSources=${latestScanMetrics.archRuleSources}, " +
-                "supportedRules=${latestScanMetrics.supportedRules}, " +
-                "unsupportedRules=${latestScanMetrics.unsupportedRules}, " +
-                "packageLookupCacheEntries=${latestScanMetrics.packageLookupCacheEntries}, " +
-                "packageLookupCacheHits=${latestScanMetrics.packageLookupCacheHits}, " +
-                "packageLookupCacheMisses=${latestScanMetrics.packageLookupCacheMisses}, " +
-                "indexingStatus=${latestScanMetrics.indexingStatus}, " +
-                "staleCacheFallback=${latestScanMetrics.staleCacheFallback}, " +
-                "durationMs=${latestScanMetrics.durationMs}"
+            "ArchUnit Lens scan completed: indexedJavaCandidateFiles=${scanMetrics.indexedJavaCandidateFiles}, " +
+                "archRuleCandidateFiles=${scanMetrics.archRuleCandidateFiles}, " +
+                "parsedRuleCandidateFiles=${scanMetrics.parsedRuleCandidateFiles}, " +
+                "archRuleSources=${scanMetrics.archRuleSources}, " +
+                "supportedRules=${scanMetrics.supportedRules}, " +
+                "unsupportedRules=${scanMetrics.unsupportedRules}, " +
+                "indexingStatus=${scanMetrics.indexingStatus}, " +
+                "staleCacheFallback=${scanMetrics.staleCacheFallback}, " +
+                "durationMs=${scanMetrics.durationMs}"
         }
-        return rules
+        return ArchRuleDiscoveryResult(
+            discoveries = rules,
+            ruleFiles = nextRuleFiles.toMap(),
+            scanMetrics = scanMetrics,
+        )
     }
 
-    private fun indexedArchTestJavaFiles(projectFileIndex: ProjectFileIndex): Set<VirtualFile> {
+    private fun indexedArchTestJavaFiles(
+        projectFileIndex: ProjectFileIndex,
+        excludedPathFragments: List<String>,
+    ): Set<VirtualFile> {
         val files = linkedSetOf<VirtualFile>()
-        val excludedPathFragments = excludedPathFragments()
         PsiSearchHelper.getInstance(project).processCandidateFilesForText(
             GlobalSearchScope.projectScope(project),
             UsageSearchContext.IN_CODE,
@@ -186,9 +238,7 @@ class ArchRuleProjectService(private val project: Project) {
         return files
     }
 
-    private fun excludedPathFragments(): List<String> = service<ArchUnitLensSettings>()
-        .state
-        .excludedPathFragments
+    private fun excludedPathFragments(settingsFingerprint: String): List<String> = settingsFingerprint
         .split(',')
         .map { it.trim() }
         .filter { it.isNotEmpty() }
@@ -202,29 +252,66 @@ class ArchRuleProjectService(private val project: Project) {
             LOG.info(message())
         }
     }
-
-    private fun clearPackageLookupCacheIfNeeded(currentModificationCount: Long) {
-        if (currentModificationCount != cachedPackageLookupModificationCount) {
-            clearPackageLookupCache(currentModificationCount)
-        }
-    }
-
-    private fun clearPackageLookupCache(currentModificationCount: Long) {
-        cachedPackageDiscoveries = emptyMap()
-        packageLookupCacheHits = 0
-        packageLookupCacheMisses = 0
-        cachedPackageLookupModificationCount = currentModificationCount
-        updatePackageLookupMetrics()
-    }
-
-    private fun updatePackageLookupMetrics() {
-        latestScanMetrics = latestScanMetrics.copy(
-            packageLookupCacheEntries = cachedPackageDiscoveries.size,
-            packageLookupCacheHits = packageLookupCacheHits,
-            packageLookupCacheMisses = packageLookupCacheMisses,
-        )
-    }
 }
+
+private data class ArchRuleCacheSnapshot(
+    val modificationCount: Long = -1,
+    val discoverySettingsFingerprint: String = "",
+    val discoveries: List<DiscoveredArchRule> = emptyList(),
+    val ruleFiles: Map<String, CachedRuleFileDiscoveries> = emptyMap(),
+    val packageLookupModificationCount: Long = -1,
+    val packageDiscoveries: Map<String, List<DiscoveredArchRule>> = emptyMap(),
+    val packageLookupCacheHits: Int = 0,
+    val packageLookupCacheMisses: Int = 0,
+    val scanMetrics: ArchRuleScanMetrics = ArchRuleScanMetrics(),
+)
+
+private data class ArchRuleDiscoveryResult(
+    val discoveries: List<DiscoveredArchRule>,
+    val ruleFiles: Map<String, CachedRuleFileDiscoveries>,
+    val scanMetrics: ArchRuleScanMetrics,
+)
+
+internal data class ArchRuleDiscoverySnapshot(
+    val discoveries: List<DiscoveredArchRule>,
+    val scanMetrics: ArchRuleScanMetrics,
+)
+
+private fun ArchRuleCacheSnapshot.clearPackageLookupCache(currentModificationCount: Long): ArchRuleCacheSnapshot = copy(
+    packageLookupModificationCount = currentModificationCount,
+    packageDiscoveries = emptyMap(),
+    packageLookupCacheHits = 0,
+    packageLookupCacheMisses = 0,
+).withUpdatedPackageLookupMetrics()
+
+private fun ArchRuleCacheSnapshot.withUpdatedPackageLookupMetrics(): ArchRuleCacheSnapshot = copy(
+    scanMetrics = scanMetrics.withPackageLookupMetrics(
+        packageLookupCacheEntries = packageDiscoveries.size,
+        packageLookupCacheHits = packageLookupCacheHits,
+        packageLookupCacheMisses = packageLookupCacheMisses,
+    ),
+)
+
+private fun ArchRuleScanMetrics.withPackageLookupMetrics(
+    packageLookupCacheEntries: Int = this.packageLookupCacheEntries,
+    packageLookupCacheHits: Int = this.packageLookupCacheHits,
+    packageLookupCacheMisses: Int = this.packageLookupCacheMisses,
+    indexingStatus: ArchRuleIndexingStatus = this.indexingStatus,
+    staleCacheFallback: Boolean = this.staleCacheFallback,
+): ArchRuleScanMetrics = copy(
+    packageLookupCacheEntries = packageLookupCacheEntries,
+    packageLookupCacheHits = packageLookupCacheHits,
+    packageLookupCacheMisses = packageLookupCacheMisses,
+    indexingStatus = indexingStatus,
+    staleCacheFallback = staleCacheFallback,
+)
+
+private fun ArchRuleCacheSnapshot.toDiscoverySnapshot(
+    packageName: String? = null,
+): ArchRuleDiscoverySnapshot = ArchRuleDiscoverySnapshot(
+    discoveries = packageName?.let { packageDiscoveries.getValue(it) } ?: discoveries,
+    scanMetrics = scanMetrics,
+)
 
 internal data class ArchRuleScanMetrics(
     val indexedJavaCandidateFiles: Int = 0,
