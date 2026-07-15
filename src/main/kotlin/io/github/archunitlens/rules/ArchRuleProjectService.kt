@@ -190,12 +190,9 @@ class ArchRuleProjectService(private val project: Project) {
                     parsedCandidateFileCount++
                     val sources = ArchRuleSourceFinder.findInFile(file)
                     currentRuleSourceCount = sources.size
-                    ruleSourceCount += currentRuleSourceCount
                     sources.mapNotNull(ArchRuleParser::discover)
                 }
-                if (canReuseCachedFile) {
-                    ruleSourceCount += currentRuleSourceCount
-                }
+                ruleSourceCount += currentRuleSourceCount
                 nextRuleFiles[cacheKey] = CachedRuleFileDiscoveries(
                     modificationStamp = modificationStamp,
                     resolutionStamp = resolutionStamp.takeIf { resolutionDependent },

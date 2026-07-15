@@ -1,5 +1,6 @@
 package io.github.archunitlens.rules
 
+import com.intellij.psi.PsiArrayAccessExpression
 import com.intellij.psi.PsiClassObjectAccessExpression
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiExpression
@@ -8,6 +9,7 @@ import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.PsiNewExpression
 import com.intellij.psi.PsiParenthesizedExpression
+import com.intellij.psi.PsiReferenceExpression
 
 /**
  * A single static ArchUnit DSL method call extracted from a PSI initializer.
@@ -79,21 +81,19 @@ object RawCallExtractor {
         return calls.asReversed()
     }
 
-    private fun PsiExpression.stringLiteralValue(): String? = (this as? PsiLiteralExpression)?.value as? String
-
-    private fun PsiExpression.classLiteralName(): String? = (this as? PsiClassObjectAccessExpression)?.operand?.type?.canonicalText
-
-    private fun PsiExpression.toRawArgument(position: Int): RawArgument = when {
-        stringLiteralValue() != null -> RawArgument.StringLiteral(position, stringLiteralValue()!!)
-        classLiteralName() != null -> RawArgument.ClassLiteral(
+    private fun PsiExpression.toRawArgument(position: Int): RawArgument = when (this) {
+        is PsiLiteralExpression -> (value as? String)
+            ?.let { RawArgument.StringLiteral(position, it) }
+            ?: RawArgument.CustomExpression(position, text)
+        is PsiClassObjectAccessExpression -> RawArgument.ClassLiteral(
             position,
-            classLiteralName()!!,
-            classLiteralResolvedName(),
+            operand.type.canonicalText,
+            (operand.type as? PsiClassType)?.resolve()?.qualifiedName,
         )
-        this is PsiMethodCallExpression -> RawArgument.NestedCall(position, methodExpression.referenceName)
-        this is PsiLambdaExpression -> RawArgument.Lambda(position)
-        this is PsiNewExpression -> RawArgument.CustomExpression(position, text)
-        this is com.intellij.psi.PsiReferenceExpression || this is com.intellij.psi.PsiArrayAccessExpression ->
+        is PsiMethodCallExpression -> RawArgument.NestedCall(position, methodExpression.referenceName)
+        is PsiLambdaExpression -> RawArgument.Lambda(position)
+        is PsiNewExpression -> RawArgument.CustomExpression(position, text)
+        is PsiReferenceExpression, is PsiArrayAccessExpression ->
             RawArgument.Reference(position, text)
         else -> RawArgument.CustomExpression(position, text)
     }
@@ -101,10 +101,5 @@ object RawCallExtractor {
     private fun PsiExpression.unwrapped(): PsiExpression = when (this) {
         is PsiParenthesizedExpression -> expression?.unwrapped() ?: this
         else -> this
-    }
-
-    private fun PsiExpression.classLiteralResolvedName(): String? {
-        val classObject = this as? PsiClassObjectAccessExpression ?: return null
-        return (classObject.operand.type as? PsiClassType)?.resolve()?.qualifiedName
     }
 }
