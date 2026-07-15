@@ -482,6 +482,21 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
     }
 
+    fun testClassPredicatesRequireExplicitThatSelector() {
+        val allClasses = discoverSingleRule(exactRule("classes().should().beEnums()", "classes"))
+        assertTrue(allClasses.liveRule is ClassConventionRule)
+        assertEquals(PredicateExpr.All, allClasses.descriptor.predicate)
+
+        val explicitSelector = discoverSingleRule(classConventionRule("areNotEnums()", "beEnums()"))
+        assertTrue(explicitSelector.liveRule is ClassConventionRule)
+
+        val selectorless = discoverSingleRule(
+            exactRule("classes().areNotEnums().should().beEnums()", "classes"),
+        )
+        assertNull(selectorless.liveRule)
+        assertTrue(selectorless.descriptor.supportStatus is SupportStatus.Unsupported)
+    }
+
     fun testParsesQueryMapperInterfaceNamingSubset() {
         val discovered = discoverSingleRule(
             """

@@ -470,14 +470,10 @@ object ArchRuleParser {
 
     private fun List<RawCall>.classPredicate(context: PsiExpression): PredicateExpr? {
         if (firstOrNull()?.name != "classes") return null
-        val predicateCalls = drop(1).let { remaining ->
-            if (remaining.firstOrNull()?.name == "that") {
-                remaining.drop(1).takeIf { it.isNotEmpty() } ?: return null
-            } else {
-                remaining
-            }
-        }
-        if (predicateCalls.isEmpty()) return PredicateExpr.All
+        val remaining = drop(1)
+        if (remaining.isEmpty()) return PredicateExpr.All
+        if (remaining.first().name != "that") return null
+        val predicateCalls = remaining.drop(1).takeIf { it.isNotEmpty() } ?: return null
 
         var expression: PredicateExpr? = null
         var pendingOperator: String? = null

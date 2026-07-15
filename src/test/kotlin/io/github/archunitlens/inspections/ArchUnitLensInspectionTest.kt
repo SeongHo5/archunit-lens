@@ -1106,6 +1106,24 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testSelectorlessClassPredicateProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule selectorless = classes()
+                            .areNotEnums().should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Candidate.java", "package com.example; class Candidate {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
     fun testDeferredCodeAccessRulesProduceNoWarning() {
         addArchitectureRulesFixture("deferredCodeAccess")
         myFixture.configureByText(
