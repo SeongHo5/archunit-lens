@@ -210,6 +210,121 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
         )
     }
 
+    fun testEvaluatesEveryClassConditionWithCompliantAndViolatingTargets() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Required.java",
+            "package com.example; public @interface Required {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Forbidden.java",
+            "package com.example; public @interface Forbidden {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Base.java",
+            "package com.example; public class Base {}",
+        )
+        val annotatedRequired = addJavaClass(
+            "src/test/java/com/example/AnnotatedRequired.java",
+            "package com.example; @com.example.Required class AnnotatedRequired {}",
+        )
+        val plain = addJavaClass(
+            "src/test/java/com/example/Plain.java",
+            "package com.example; class Plain {}",
+        )
+        val annotatedForbidden = addJavaClass(
+            "src/test/java/com/example/AnnotatedForbidden.java",
+            "package com.example; @com.example.Forbidden class AnnotatedForbidden {}",
+        )
+        val service = addJavaClass(
+            "src/test/java/com/example/OrderService.java",
+            "package com.example; class OrderService {}",
+        )
+        val serviceImpl = addJavaClass(
+            "src/test/java/com/example/OrderServiceImpl.java",
+            "package com.example; class OrderServiceImpl {}",
+        )
+        val port = addJavaClass(
+            "src/test/java/com/example/OrderPort.java",
+            "package com.example; interface OrderPort {}",
+        )
+        val state = addJavaClass(
+            "src/test/java/com/example/OrderState.java",
+            "package com.example; enum OrderState { OPEN }",
+        )
+        val subtype = addJavaClass(
+            "src/test/java/com/example/Subtype.java",
+            "package com.example; class Subtype extends com.example.Base {}",
+        )
+
+        assertCondition(
+            "beAnnotatedWith(\"com.example.Required\")",
+            annotatedRequired,
+            plain,
+            ClassConditionViolation.MissingAnnotation("com.example.Required"),
+        )
+        assertCondition(
+            "notBeAnnotatedWith(\"com.example.Forbidden\")",
+            plain,
+            annotatedForbidden,
+            ClassConditionViolation.ForbiddenAnnotation("com.example.Forbidden"),
+        )
+        assertCondition(
+            "resideInAPackage(\"..service..\")",
+            plain,
+            plain,
+            ClassConditionViolation.OutsidePackages(listOf("..service..")),
+            compliantPackage = "com.example.service",
+            violatingPackage = "com.example.web",
+        )
+        assertCondition(
+            "resideInAnyPackage(\"..service..\", \"..api..\")",
+            plain,
+            plain,
+            ClassConditionViolation.OutsidePackages(listOf("..service..", "..api..")),
+            compliantPackage = "com.example.api",
+            violatingPackage = "com.example.web",
+        )
+        assertCondition(
+            "haveSimpleNameEndingWith(\"Service\")",
+            service,
+            plain,
+            ClassConditionViolation.MissingSuffix("Service"),
+        )
+        assertCondition(
+            "haveSimpleNameNotEndingWith(\"Impl\")",
+            service,
+            serviceImpl,
+            ClassConditionViolation.ForbiddenSuffix("Impl"),
+        )
+        assertCondition("beInterfaces()", port, plain, ClassConditionViolation.MustBeInterface)
+        assertCondition("notBeInterfaces()", plain, port, ClassConditionViolation.MustNotBeInterface)
+        assertCondition("beEnums()", state, plain, ClassConditionViolation.MustBeEnum)
+        assertCondition("notBeEnums()", plain, state, ClassConditionViolation.MustNotBeEnum)
+        assertCondition(
+            "beAssignableTo(\"com.example.Base\")",
+            subtype,
+            plain,
+            ClassConditionViolation.MissingAssignableType("com.example.Base"),
+        )
+    }
+
+    private fun assertCondition(
+        condition: String,
+        compliant: com.intellij.psi.PsiClass,
+        violating: com.intellij.psi.PsiClass,
+        expectedViolation: ClassConditionViolation,
+        compliantPackage: String = "com.example",
+        violatingPackage: String = "com.example",
+    ) {
+        val rule = parseRule<ClassConventionRule>(classConventionRule("areNotEnums()", condition))
+        val compliantViolations = ClassSubjectEvaluator.violations(rule, compliant, compliantPackage)
+        assertTrue("$condition compliant violations: $compliantViolations", compliantViolations.isEmpty())
+        assertEquals(
+            listOf(expectedViolation),
+            ClassSubjectEvaluator.violations(rule, violating, violatingPackage),
+        )
+    }
+
     private fun assertPredicate(
         predicate: String,
         aClass: com.intellij.psi.PsiClass,

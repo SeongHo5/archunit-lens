@@ -733,6 +733,10 @@ class ArchRuleParserTest : BasePlatformTestCase() {
     }
 
     fun testParsesEveryStaticClassConditionLeafAndLeftAssociativeAndShould() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Base.java",
+            "package com.example; public class Base {}",
+        )
         val cases = listOf(
             "beAnnotatedWith(\"com.example.Required\")" to ConditionExpr.BeAnnotatedWith("com.example.Required", true),
             "notBeAnnotatedWith(\"com.example.Forbidden\")" to ConditionExpr.BeAnnotatedWith("com.example.Forbidden", false),
@@ -796,6 +800,18 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertTrue((discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnresolvedSymbol)
     }
 
+    fun testUnresolvedAssignableTargetMakesWholeFallbackMetadataOnly() {
+        val discovered = discoverSingleRule(
+            classConventionRule(
+                "areNotEnums()",
+                "beAssignableTo(\"com.example.Missing\")",
+            ),
+        )
+
+        assertNull(discovered.liveRule)
+        assertTrue((discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnresolvedSymbol)
+    }
+
     fun testDeferredDeclarationAndCodeAccessRulesStayMetadataOnly() {
         val rules = listOf(
             exactRule(
@@ -838,6 +854,26 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             assertTrue(
                 "$family should own and reject malformed arity",
                 ArchRuleParser.classifyExactHandler(family, source, malformedCalls) is ExactHandlerDecision.Unsupported,
+            )
+            val argumentCallIndex = calls.indexOfFirst { it.arguments.isNotEmpty() }
+            assertTrue("$family should have an argument-bearing owned call", argumentCallIndex >= 0)
+            val wrongKindCalls = calls.toMutableList().also { wrongKind ->
+                wrongKind[argumentCallIndex] = wrongKind[argumentCallIndex].copy(
+                    arguments = listOf(RawArgument.Lambda(0)),
+                )
+            }
+            assertTrue(
+                "$family should own and reject wrong argument kinds",
+                ArchRuleParser.classifyExactHandler(family, source, wrongKindCalls) is ExactHandlerDecision.Unsupported,
+            )
+            val unresolvedCalls = calls.toMutableList().also { unresolved ->
+                unresolved[argumentCallIndex] = unresolved[argumentCallIndex].copy(
+                    arguments = listOf(RawArgument.Reference(0, "missingSymbol")),
+                )
+            }
+            assertTrue(
+                "$family should own and reject unresolved inputs",
+                ArchRuleParser.classifyExactHandler(family, source, unresolvedCalls) is ExactHandlerDecision.Unsupported,
             )
         }
     }

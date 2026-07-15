@@ -1,5 +1,6 @@
 package io.github.archunitlens.rules
 
+import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiExpression
 import com.intellij.psi.PsiImportStatement
 import com.intellij.psi.PsiJavaFile
@@ -531,7 +532,7 @@ object ArchRuleParser {
         "notBeInterfaces" -> ConditionExpr.BeInterfaces(required = false)
         "beEnums" -> ConditionExpr.BeEnums(required = true)
         "notBeEnums" -> ConditionExpr.BeEnums(required = false)
-        "beAssignableTo" -> staticQualifiedType(context)?.let(ConditionExpr::BeAssignableTo)
+        "beAssignableTo" -> staticallyResolvableType(context)?.let(ConditionExpr::BeAssignableTo)
         else -> null
     }
 
@@ -540,6 +541,13 @@ object ArchRuleParser {
             ?.let { it as? RawArgument.ClassLiteral }
             ?.resolvedQualifiedName
             ?.let { qualifyClassLiteral(it, context) }
+
+    private fun RawCall.staticallyResolvableType(context: PsiExpression): String? {
+        val qualifiedName = staticQualifiedType(context) ?: return null
+        return JavaPsiFacade.getInstance(context.project)
+            .findClass(qualifiedName, context.resolveScope)
+            ?.qualifiedName
+    }
 
     private fun List<RawCall>.classFallbackReason(context: PsiExpression): UnsupportedReason {
         val typeCall = firstOrNull {
@@ -550,7 +558,11 @@ object ArchRuleParser {
                 "notBeAnnotatedWith",
                 "beAssignableTo",
             ) &&
-                it.staticQualifiedType(context) == null
+                if (it.name == "beAssignableTo") {
+                    it.staticallyResolvableType(context) == null
+                } else {
+                    it.staticQualifiedType(context) == null
+                }
         }
         if (typeCall != null) {
             val symbol = typeCall.arguments.singleOrNull()?.let { argument ->

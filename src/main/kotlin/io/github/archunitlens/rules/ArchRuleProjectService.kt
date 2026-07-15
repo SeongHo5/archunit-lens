@@ -1,6 +1,7 @@
 package io.github.archunitlens.rules
 
 import com.intellij.ide.highlighter.JavaFileType
+import com.intellij.lang.java.JavaLanguage
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -8,6 +9,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
+import com.intellij.openapi.roots.ProjectRootModificationTracker
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiManager
@@ -69,10 +71,13 @@ class ArchRuleProjectService(private val project: Project) {
     private fun currentDiscoverySnapshot(): ArchRuleCacheSnapshot {
         while (true) {
             val cachedSnapshot = cache.get()
-            val currentModificationCount = PsiModificationTracker.getInstance(project).modificationCount
+            val psiModificationTracker = PsiModificationTracker.getInstance(project)
+            val currentModificationCount = psiModificationTracker.modificationCount
+            val currentProjectRootModificationCount = ProjectRootModificationTracker.getInstance(project).modificationCount
             val settingsFingerprint = discoverySettingsFingerprint()
             if (
                 currentModificationCount == cachedSnapshot.modificationCount &&
+                currentProjectRootModificationCount == cachedSnapshot.projectRootModificationCount &&
                 settingsFingerprint == cachedSnapshot.discoverySettingsFingerprint
             ) {
                 return cachedSnapshot
@@ -96,9 +101,16 @@ class ArchRuleProjectService(private val project: Project) {
                 val discoveryResult = collectDiscoveries(
                     cachedRuleFiles = cachedSnapshot.ruleFiles,
                     excludedPathFragments = excludedPathFragments(settingsFingerprint),
+                    resolutionStamp = ResolutionStamp(
+                        javaLanguageModificationCount = psiModificationTracker
+                            .forLanguage(JavaLanguage.INSTANCE)
+                            .modificationCount,
+                        projectRootModificationCount = currentProjectRootModificationCount,
+                    ),
                 )
                 ArchRuleCacheSnapshot(
                     modificationCount = currentModificationCount,
+                    projectRootModificationCount = currentProjectRootModificationCount,
                     discoverySettingsFingerprint = settingsFingerprint,
                     discoveries = discoveryResult.discoveries,
                     ruleFiles = discoveryResult.ruleFiles,
@@ -145,6 +157,7 @@ class ArchRuleProjectService(private val project: Project) {
     private fun collectDiscoveries(
         cachedRuleFiles: Map<String, CachedRuleFileDiscoveries>,
         excludedPathFragments: List<String>,
+        resolutionStamp: ResolutionStamp,
     ): ArchRuleDiscoveryResult {
         val startedAt = System.nanoTime()
         val psiManager = PsiManager.getInstance(project)
@@ -164,8 +177,11 @@ class ArchRuleProjectService(private val project: Project) {
                 val cacheKey = file.virtualFile?.path ?: file.name
                 val modificationStamp = file.textHashStamp()
                 val cachedFile = cachedRuleFiles[cacheKey]
+                val resolutionDependent = file.requiresTypeResolution()
+                val canReuseCachedFile = cachedFile?.modificationStamp == modificationStamp &&
+                    (!resolutionDependent || cachedFile.resolutionStamp == resolutionStamp)
                 var currentRuleSourceCount = cachedFile?.ruleSourceCount ?: 0
-                val ruleFileDiscoveries = if (cachedFile?.modificationStamp == modificationStamp) {
+                val ruleFileDiscoveries = if (canReuseCachedFile) {
                     cachedFile.discoveries
                 } else {
                     parsedCandidateFileCount++
@@ -174,11 +190,12 @@ class ArchRuleProjectService(private val project: Project) {
                     ruleSourceCount += currentRuleSourceCount
                     sources.mapNotNull(ArchRuleParser::discover)
                 }
-                if (cachedFile?.modificationStamp == modificationStamp) {
+                if (canReuseCachedFile) {
                     ruleSourceCount += currentRuleSourceCount
                 }
                 nextRuleFiles[cacheKey] = CachedRuleFileDiscoveries(
                     modificationStamp = modificationStamp,
+                    resolutionStamp = resolutionStamp.takeIf { resolutionDependent },
                     ruleSourceCount = currentRuleSourceCount,
                     discoveries = ruleFileDiscoveries,
                 )
@@ -256,6 +273,7 @@ class ArchRuleProjectService(private val project: Project) {
 
 private data class ArchRuleCacheSnapshot(
     val modificationCount: Long = -1,
+    val projectRootModificationCount: Long = -1,
     val discoverySettingsFingerprint: String = "",
     val discoveries: List<DiscoveredArchRule> = emptyList(),
     val ruleFiles: Map<String, CachedRuleFileDiscoveries> = emptyMap(),
@@ -335,8 +353,14 @@ internal enum class ArchRuleIndexingStatus {
 
 private data class CachedRuleFileDiscoveries(
     val modificationStamp: Int,
+    val resolutionStamp: ResolutionStamp?,
     val ruleSourceCount: Int,
     val discoveries: List<DiscoveredArchRule>,
+)
+
+private data class ResolutionStamp(
+    val javaLanguageModificationCount: Long,
+    val projectRootModificationCount: Long,
 )
 
 private val LOG = Logger.getInstance(ArchRuleProjectService::class.java)
@@ -345,6 +369,11 @@ private const val ARCH_TEST_WORD = "ArchTest"
 private const val NANOS_PER_MILLISECOND = 1_000_000
 
 private fun PsiJavaFile.textHashStamp(): Int = text.hashCode()
+
+private fun PsiJavaFile.requiresTypeResolution(): Boolean = CLASS_LITERAL_PATTERN.containsMatchIn(text) ||
+    text.contains("beAssignableTo(")
+
+private val CLASS_LITERAL_PATTERN = Regex("\\.class\\b")
 
 private fun DiscoveredArchRule.appliesToPackage(packageName: String): Boolean = liveRule?.appliesToPackage(packageName)
     ?: descriptor.scope.includes(packageName)

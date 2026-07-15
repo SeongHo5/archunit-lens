@@ -19,10 +19,12 @@ import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.ClassConventionRule
 import io.github.archunitlens.rules.ClassMetaAnnotationRule
 import io.github.archunitlens.rules.ClassNameSuffixRule
+import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
 import io.github.archunitlens.rules.InterfaceNamingRule
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
+import io.github.archunitlens.rules.PredicateExpr
 import io.github.archunitlens.rules.evaluator.ClassSubjectEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
 
@@ -254,7 +256,7 @@ private fun io.github.archunitlens.rules.LiveArchRule.isEnabledBy(
     settings: io.github.archunitlens.settings.ArchUnitLensSettingsState,
 ): Boolean = when (this) {
     is ClassNameSuffixRule -> settings.classNamingRulesEnabled
-    is ClassConventionRule -> true
+    is ClassConventionRule -> predicate.isEnabledBy(settings) && condition.isEnabledBy(settings)
     is PackageDependencyBanRule -> settings.dependencyRulesEnabled
     is ForbiddenAnnotationRule,
     is AnnotationExclusivityRule,
@@ -262,4 +264,34 @@ private fun io.github.archunitlens.rules.LiveArchRule.isEnabledBy(
     is MethodMetaAnnotationRule,
     -> settings.annotationRulesEnabled
     is InterfaceNamingRule -> settings.interfaceRulesEnabled
+}
+
+private fun PredicateExpr.isEnabledBy(settings: io.github.archunitlens.settings.ArchUnitLensSettingsState): Boolean = when (this) {
+    PredicateExpr.All -> true
+    is PredicateExpr.Leaf -> false
+    is PredicateExpr.AreAnnotatedWith,
+    is PredicateExpr.AreNotAnnotatedWith,
+    -> settings.annotationRulesEnabled
+    is PredicateExpr.ResideInPackages,
+    is PredicateExpr.HaveSimpleNameEndingWith,
+    is PredicateExpr.HaveSimpleNameNotEndingWith,
+    -> settings.classNamingRulesEnabled
+    is PredicateExpr.AreInterfaces,
+    is PredicateExpr.AreEnums,
+    -> settings.interfaceRulesEnabled
+    is PredicateExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
+    is PredicateExpr.Or -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
+}
+
+private fun ConditionExpr.isEnabledBy(settings: io.github.archunitlens.settings.ArchUnitLensSettingsState): Boolean = when (this) {
+    is ConditionExpr.Leaf -> false
+    is ConditionExpr.BeAnnotatedWith -> settings.annotationRulesEnabled
+    is ConditionExpr.ResideInPackages,
+    is ConditionExpr.HaveSimpleNameEndingWith,
+    -> settings.classNamingRulesEnabled
+    is ConditionExpr.BeInterfaces,
+    is ConditionExpr.BeEnums,
+    is ConditionExpr.BeAssignableTo,
+    -> settings.interfaceRulesEnabled
+    is ConditionExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
 }

@@ -279,6 +279,35 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(ArchRuleIndexingStatus.SMART, service.scanMetrics().indexingStatus)
     }
 
+    fun testResolutionDependentRuleReparsesWhenTargetAppearsAfterCacheWarmup() {
+        addArchitectureRules("ArchitectureRules.java", assignabilityRule())
+        val service = project.service<ArchRuleProjectService>()
+
+        assertNull(service.discoveries().single().liveRule)
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Base.java",
+            "package com.example; public class Base {}",
+        )
+
+        assertTrue(service.discoveries().single().liveRule is ClassConventionRule)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
+    fun testResolutionDependentRuleReparsesWhenTargetDisappearsAfterCacheWarmup() {
+        val target = myFixture.addFileToProject(
+            "src/test/java/com/example/Base.java",
+            "package com.example; public class Base {}",
+        )
+        addArchitectureRules("ArchitectureRules.java", assignabilityRule())
+        val service = project.service<ArchRuleProjectService>()
+
+        assertTrue(service.discoveries().single().liveRule is ClassConventionRule)
+        WriteCommandAction.runWriteCommandAction(project) { target.delete() }
+
+        assertNull(service.discoveries().single().liveRule)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
     fun testSettingsExcludeGeneratedRuleSourcesFromDiscovery() {
         val state = service<ArchUnitLensSettings>().state
         val original = state.excludedPathFragments
@@ -361,6 +390,19 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
                                 .resideInAPackage("..controller..")
                                 .should()
                                 .haveSimpleNameEndingWith("$requiredSuffix");
+            }
+        """.trimIndent()
+
+    private fun assignabilityRule(): String =
+        """
+            import com.tngtech.archunit.junit.ArchTest;
+            import com.tngtech.archunit.lang.ArchRule;
+            import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+            class ArchitectureRules {
+                @ArchTest
+                static final ArchRule assignable_types = classes().that().areNotEnums()
+                        .should().beAssignableTo(com.example.Base.class);
             }
         """.trimIndent()
 }
