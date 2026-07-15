@@ -396,7 +396,7 @@ object ArchRuleParser {
                 "areAnnotatedWith", "areNotAnnotatedWith", "beAnnotatedWith", "notBeAnnotatedWith",
                 "notBeMetaAnnotatedWith", "beAssignableTo",
                 ->
-                    ArgumentExpectation.Annotation(exact = 1)
+                    ArgumentExpectation.Annotation
                 else -> continue
             }
             expectation.validate(call)?.let { return it }
@@ -432,10 +432,10 @@ object ArchRuleParser {
             }
         }
 
-        data class Annotation(val exact: Int) : ArgumentExpectation {
+        data object Annotation : ArgumentExpectation {
             override fun validate(call: RawCall): UnsupportedReason? {
-                if (call.arguments.size != exact) {
-                    return UnsupportedReason.InvalidArity(call.name, exact.toString(), call.arguments.size)
+                if (call.arguments.size != 1) {
+                    return UnsupportedReason.InvalidArity(call.name, "1", call.arguments.size)
                 }
                 val unsupported = call.arguments.firstOrNull {
                     it !is RawArgument.StringLiteral && it !is RawArgument.ClassLiteral
