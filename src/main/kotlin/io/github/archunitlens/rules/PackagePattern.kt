@@ -4,7 +4,19 @@ package io.github.archunitlens.rules
  * Segment-aware matcher for ArchUnit-style package patterns such as `..domain..`.
  */
 object PackagePattern {
+    fun isSupported(pattern: String): Boolean {
+        val exactSegments = pattern.removePrefix("..").removeSuffix("..")
+        return exactSegments.isNotEmpty() &&
+            !exactSegments.contains("..") &&
+            exactSegments.split('.').all { segment ->
+                segment.isNotEmpty() &&
+                    Character.isJavaIdentifierStart(segment.first()) &&
+                    segment.drop(1).all(Character::isJavaIdentifierPart)
+            }
+    }
+
     fun matches(pattern: String, target: String): Boolean {
+        if (!isSupported(pattern)) return false
         val patternSegments = pattern.split("..", ".")
             .filter { it.isNotBlank() }
         if (patternSegments.isEmpty()) return false

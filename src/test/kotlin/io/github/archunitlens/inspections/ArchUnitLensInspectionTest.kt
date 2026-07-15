@@ -1056,6 +1056,56 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testUnsupportedClassPackagePatternsProduceNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule invalid_middle_predicate = classes().that()
+                            .resideInAPackage("com..service").should().beEnums();
+                    @ArchTest static final ArchRule invalid_star_condition = classes().that().areNotEnums()
+                            .should().resideInAPackage("com.*.service");
+                    @ArchTest static final ArchRule invalid_middle_condition = classes().that().areNotEnums()
+                            .should().resideInAPackage("com..service");
+                    @ArchTest static final ArchRule invalid_any_condition = classes().that().areNotEnums()
+                            .should().resideInAnyPackage("com.*.service", "..allowed..");
+                }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText("Candidate.java", "package com.service; class Candidate {}")
+        assertTrue(warningDescriptions().isEmpty())
+        myFixture.configureByText("Outside.java", "package com.other; class Outside {}")
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testMalformedClassPredicateGrammarProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule consecutive = classes().that()
+                            .resideInAPackage("..service..").haveSimpleNameNotEndingWith("Never")
+                            .should().beEnums();
+                    @ArchTest static final ArchRule dangling_that = classes().that().should().beEnums();
+                    @ArchTest static final ArchRule dangling_and = classes().that()
+                            .resideInAPackage("..service..").and().should().beEnums();
+                    @ArchTest static final ArchRule dangling_or = classes().that()
+                            .resideInAPackage("..service..").or().should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Candidate.java", "package com.example.service; class Candidate {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
     fun testDeferredCodeAccessRulesProduceNoWarning() {
         addArchitectureRulesFixture("deferredCodeAccess")
         myFixture.configureByText(

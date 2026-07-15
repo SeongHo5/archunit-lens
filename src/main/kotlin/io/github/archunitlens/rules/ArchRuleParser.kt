@@ -471,7 +471,11 @@ object ArchRuleParser {
     private fun List<RawCall>.classPredicate(context: PsiExpression): PredicateExpr? {
         if (firstOrNull()?.name != "classes") return null
         val predicateCalls = drop(1).let { remaining ->
-            if (remaining.firstOrNull()?.name == "that") remaining.drop(1) else remaining
+            if (remaining.firstOrNull()?.name == "that") {
+                remaining.drop(1).takeIf { it.isNotEmpty() } ?: return null
+            } else {
+                remaining
+            }
         }
         if (predicateCalls.isEmpty()) return PredicateExpr.All
 
@@ -482,6 +486,7 @@ object ArchRuleParser {
                 if (expression == null || pendingOperator != null) return null
                 pendingOperator = call.name
             } else {
+                if (expression != null && pendingOperator == null) return null
                 val leaf = call.classPredicateLeaf(context) ?: return null
                 expression = expression.appendPredicate(leaf, pendingOperator)
                 pendingOperator = null
@@ -493,7 +498,7 @@ object ArchRuleParser {
     private fun RawCall.classPredicateLeaf(context: PsiExpression): PredicateExpr? = when (name) {
         "areAnnotatedWith" -> staticQualifiedType(context)?.let(PredicateExpr::AreAnnotatedWith)
         "areNotAnnotatedWith" -> staticQualifiedType(context)?.let(PredicateExpr::AreNotAnnotatedWith)
-        "resideInAPackage", "resideInAnyPackage" -> PredicateExpr.ResideInPackages(stringArgs)
+        "resideInAPackage", "resideInAnyPackage" -> supportedPackagePatterns()?.let(PredicateExpr::ResideInPackages)
         "haveSimpleNameEndingWith" -> stringArgs.singleOrNull()?.let(PredicateExpr::HaveSimpleNameEndingWith)
         "haveSimpleNameNotEndingWith" -> stringArgs.singleOrNull()?.let(PredicateExpr::HaveSimpleNameNotEndingWith)
         "areInterfaces" -> PredicateExpr.AreInterfaces(expected = true)
@@ -524,7 +529,7 @@ object ArchRuleParser {
     private fun RawCall.classConditionLeaf(context: PsiExpression): ConditionExpr? = when (name) {
         "beAnnotatedWith" -> staticQualifiedType(context)?.let { ConditionExpr.BeAnnotatedWith(it, required = true) }
         "notBeAnnotatedWith" -> staticQualifiedType(context)?.let { ConditionExpr.BeAnnotatedWith(it, required = false) }
-        "resideInAPackage", "resideInAnyPackage" -> ConditionExpr.ResideInPackages(stringArgs)
+        "resideInAPackage", "resideInAnyPackage" -> supportedPackagePatterns()?.let(ConditionExpr::ResideInPackages)
         "haveSimpleNameEndingWith" -> stringArgs.singleOrNull()?.let {
             ConditionExpr.HaveSimpleNameEndingWith(it, required = true)
         }
@@ -544,6 +549,10 @@ object ArchRuleParser {
             ?.let { it as? RawArgument.ClassLiteral }
             ?.resolvedQualifiedName
             ?.let { qualifyClassLiteral(it, context) }
+
+    private fun RawCall.supportedPackagePatterns(): List<String>? = stringArgs.takeIf { patterns ->
+        patterns.isNotEmpty() && patterns.all(PackagePattern::isSupported)
+    }
 
     private fun RawCall.staticallyResolvableType(context: PsiExpression): String? {
         val qualifiedName = staticQualifiedType(context) ?: return null

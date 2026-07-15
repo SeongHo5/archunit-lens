@@ -458,7 +458,7 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
     }
 
-    fun testExtraPredicateDoesNotPartiallyMatchLiveAnnotationRule() {
+    fun testConsecutiveClassPredicatesStayMetadataOnly() {
         val discovered = discoverSingleRule(
             """
                 import com.tngtech.archunit.junit.ArchTest;
@@ -478,15 +478,8 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             """.trimIndent(),
         )
 
-        assertTrue(discovered.liveRule is ClassConventionRule)
-        assertEquals(
-            PredicateExpr.And(
-                PredicateExpr.ResideInPackages(listOf("..persistence..")),
-                PredicateExpr.AreAnnotatedWith("org.apache.ibatis.annotations.Mapper"),
-            ),
-            discovered.descriptor.predicate,
-        )
-        assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
+        assertNull(discovered.liveRule)
+        assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
     }
 
     fun testParsesQueryMapperInterfaceNamingSubset() {
@@ -749,6 +742,41 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         }
     }
 
+    fun testClassPackagePatternsAcceptOnlyTheProvenMatcherSubset() {
+        listOf("com.example.service", "..service..", "..service", "com.example..").forEach { pattern ->
+            val discovered = discoverSingleRule(
+                classConventionRule("resideInAPackage(\"$pattern\")", "beEnums()"),
+            )
+            assertTrue("$pattern should be supported", discovered.liveRule is ClassConventionRule)
+        }
+
+        val unsupportedRules = listOf(
+            classConventionRule("resideInAPackage(\"com.*.service\")", "beEnums()"),
+            classConventionRule("resideInAnyPackage(\"..service..\", \"com..service\")", "beEnums()"),
+            classConventionRule("areNotEnums()", "resideInAPackage(\"com.*.service\")"),
+            classConventionRule("areNotEnums()", "resideInAnyPackage(\"..service..\", \"com..service\")"),
+        )
+        unsupportedRules.forEach { code ->
+            val discovered = discoverSingleRule(code)
+            assertNull(discovered.liveRule)
+            assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        }
+    }
+
+    fun testDanglingClassPredicateTokensStayMetadataOnly() {
+        val malformedRules = listOf(
+            "classes().that().should().beEnums()",
+            "classes().that().resideInAPackage(\"..service..\").and().should().beEnums()",
+            "classes().that().resideInAPackage(\"..service..\").or().should().beEnums()",
+        )
+
+        malformedRules.forEach { initializer ->
+            val discovered = discoverSingleRule(exactRule(initializer, "classes"))
+            assertNull(discovered.liveRule)
+            assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        }
+    }
+
     fun testParsesEveryStaticClassConditionLeafAndLeftAssociativeAndShould() {
         myFixture.addFileToProject(
             "src/test/java/com/example/Base.java",
@@ -831,25 +859,39 @@ class ArchRuleParserTest : BasePlatformTestCase() {
 
     fun testUnresolvedClassLiteralsKeepEveryTypeBearingExactHandlerMetadataOnly() {
         val file = configureJava(testData("archrules/exactUnresolvedClassLiterals.java"))
-        val expectedReasons = mapOf(
-            "unresolved_forbidden_annotation" to
+        val expectedCases = mapOf(
+            "unresolved_forbidden_annotation" to Pair(
+                ExactHandlerFamily.FORBIDDEN_ANNOTATION,
                 UnsupportedReason.UnresolvedSymbol("beAnnotatedWith", "com.example.missing.Forbidden"),
-            "unresolved_annotation_exclusivity" to
+            ),
+            "unresolved_annotation_exclusivity" to Pair(
+                ExactHandlerFamily.ANNOTATION_EXCLUSIVITY,
                 UnsupportedReason.UnresolvedSymbol("areAnnotatedWith", "com.example.missing.Required"),
-            "unresolved_interface_assignability" to
+            ),
+            "unresolved_interface_assignability" to Pair(
+                ExactHandlerFamily.INTERFACE_NAMING,
                 UnsupportedReason.UnresolvedSymbol("beAssignableTo", "com.example.missing.Base"),
-            "unresolved_class_meta_annotation" to
+            ),
+            "unresolved_class_meta_annotation" to Pair(
+                ExactHandlerFamily.CLASS_META_ANNOTATION,
                 UnsupportedReason.UnresolvedSymbol("notBeMetaAnnotatedWith", "com.example.missing.Proxy"),
-            "unresolved_method_meta_annotation" to
+            ),
+            "unresolved_method_meta_annotation" to Pair(
+                ExactHandlerFamily.METHOD_META_ANNOTATION,
                 UnsupportedReason.UnresolvedSymbol("notBeMetaAnnotatedWith", "com.example.missing.Proxy"),
+            ),
         )
 
-        val discoveries = ArchRuleSourceFinder.findInFile(file)
-            .mapNotNull(ArchRuleParser::discover)
-            .associateBy { it.ruleName }
-        assertEquals(expectedReasons.keys, discoveries.keys)
-        expectedReasons.forEach { (ruleName, expectedReason) ->
-            val discovered = discoveries.getValue(ruleName)
+        val sources = ArchRuleSourceFinder.findInFile(file).associateBy { it.ruleName }
+        assertEquals(expectedCases.keys, sources.keys)
+        expectedCases.forEach { (ruleName, expectedCase) ->
+            val (family, expectedReason) = expectedCase
+            val source = sources.getValue(ruleName)
+            assertEquals(
+                ExactHandlerDecision.Unsupported(expectedReason),
+                ArchRuleParser.classifyExactHandler(family, source, RawCallExtractor.from(source.initializer)),
+            )
+            val discovered = ArchRuleParser.discover(source) ?: error("Expected discovered rule")
             assertNull(discovered.liveRule)
             assertEquals(expectedReason, (discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason)
         }
@@ -915,9 +957,11 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             val malformedCalls = calls.toMutableList().also { malformed ->
                 malformed[0] = malformed[0].copy(arguments = listOf(RawArgument.Reference(0, "dynamic")))
             }
-            assertTrue(
-                "$family should own and reject malformed arity",
-                ArchRuleParser.classifyExactHandler(family, source, malformedCalls) is ExactHandlerDecision.Unsupported,
+            val invalidArity = UnsupportedReason.InvalidArity(calls[0].name, "0", 1)
+            assertEquals(
+                "$family should preserve its exact invalid-arity reason",
+                ExactHandlerDecision.Unsupported(family.expectedExactReason(invalidArity)),
+                ArchRuleParser.classifyExactHandler(family, source, malformedCalls),
             )
             val argumentCallIndex = calls.indexOfFirst { it.arguments.isNotEmpty() }
             assertTrue("$family should have an argument-bearing owned call", argumentCallIndex >= 0)
@@ -926,18 +970,11 @@ class ArchRuleParserTest : BasePlatformTestCase() {
                     arguments = listOf(RawArgument.Lambda(0)),
                 )
             }
-            assertTrue(
-                "$family should own and reject wrong argument kinds",
-                ArchRuleParser.classifyExactHandler(family, source, wrongKindCalls) is ExactHandlerDecision.Unsupported,
-            )
-            val unresolvedCalls = calls.toMutableList().also { unresolved ->
-                unresolved[argumentCallIndex] = unresolved[argumentCallIndex].copy(
-                    arguments = listOf(RawArgument.Reference(0, "missingSymbol")),
-                )
-            }
-            assertTrue(
-                "$family should own and reject unresolved inputs",
-                ArchRuleParser.classifyExactHandler(family, source, unresolvedCalls) is ExactHandlerDecision.Unsupported,
+            val unsupportedArgument = UnsupportedReason.UnsupportedArgument(calls[argumentCallIndex].name, 0, "lambda")
+            assertEquals(
+                "$family should preserve its exact unsupported-argument reason",
+                ExactHandlerDecision.Unsupported(family.expectedExactReason(unsupportedArgument)),
+                ArchRuleParser.classifyExactHandler(family, source, wrongKindCalls),
             )
         }
     }
@@ -1042,6 +1079,16 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             "methods",
         ),
     )
+
+    private fun ExactHandlerFamily.expectedExactReason(reason: UnsupportedReason): UnsupportedReason {
+        val metaAnnotationFamily = this == ExactHandlerFamily.CLASS_META_ANNOTATION ||
+            this == ExactHandlerFamily.METHOD_META_ANNOTATION
+        return if (metaAnnotationFamily && reason !is UnsupportedReason.UnresolvedSymbol) {
+            UnsupportedReason.CustomOrMetaAnnotationPredicates
+        } else {
+            reason
+        }
+    }
 
     private fun exactRule(
         initializer: String,
