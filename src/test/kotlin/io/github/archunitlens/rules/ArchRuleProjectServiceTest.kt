@@ -6,6 +6,7 @@ import com.intellij.openapi.components.service
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
 import com.intellij.testFramework.DumbModeTestUtils
+import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.util.concurrent.CountDownLatch
@@ -279,8 +280,8 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(ArchRuleIndexingStatus.SMART, service.scanMetrics().indexingStatus)
     }
 
-    fun testResolutionDependentRuleReparsesWhenTargetAppearsAfterCacheWarmup() {
-        addArchitectureRules("ArchitectureRules.java", assignabilityRule())
+    fun testCommentedClassLiteralReparsesWhenTargetAppearsAfterCacheWarmup() {
+        addArchitectureRules("ArchitectureRules.java", commentedClassLiteralAssignabilityRule())
         val service = project.service<ArchRuleProjectService>()
 
         assertNull(service.discoveries().single().liveRule)
@@ -293,12 +294,12 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
     }
 
-    fun testResolutionDependentRuleReparsesWhenTargetDisappearsAfterCacheWarmup() {
+    fun testSpacedAssignableCallReparsesWhenTargetDisappearsAfterCacheWarmup() {
         val target = myFixture.addFileToProject(
             "src/test/java/com/example/Base.java",
             "package com.example; public class Base {}",
         )
-        addArchitectureRules("ArchitectureRules.java", assignabilityRule())
+        addArchitectureRules("ArchitectureRules.java", spacedAssignabilityRule())
         val service = project.service<ArchRuleProjectService>()
 
         assertTrue(service.discoveries().single().liveRule is ClassConventionRule)
@@ -306,6 +307,25 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
 
         assertNull(service.discoveries().single().liveRule)
         assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
+    fun testSpacedAssignableCallReparsesWhenProjectRootsChange() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Base.java",
+            "package com.example; public class Base {}",
+        )
+        addArchitectureRules("ArchitectureRules.java", spacedAssignabilityRule())
+        val service = project.service<ArchRuleProjectService>()
+        assertTrue(service.discoveries().single().liveRule is ClassConventionRule)
+
+        val extraSourceRoot = myFixture.tempDirFixture.findOrCreateDir("alternate-source")
+        PsiTestUtil.addSourceRoot(module, extraSourceRoot)
+        try {
+            assertTrue(service.discoveries().single().liveRule is ClassConventionRule)
+            assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+        } finally {
+            PsiTestUtil.removeSourceRoot(module, extraSourceRoot)
+        }
     }
 
     fun testSettingsExcludeGeneratedRuleSourcesFromDiscovery() {
@@ -393,7 +413,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
             }
         """.trimIndent()
 
-    private fun assignabilityRule(): String =
+    private fun commentedClassLiteralAssignabilityRule(): String =
         """
             import com.tngtech.archunit.junit.ArchTest;
             import com.tngtech.archunit.lang.ArchRule;
@@ -402,7 +422,20 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
             class ArchitectureRules {
                 @ArchTest
                 static final ArchRule assignable_types = classes().that().areNotEnums()
-                        .should().beAssignableTo(com.example.Base.class);
+                        .should().beAssignableTo(com.example.Base /* target */ . /* token */ class);
+            }
+        """.trimIndent()
+
+    private fun spacedAssignabilityRule(): String =
+        """
+            import com.tngtech.archunit.junit.ArchTest;
+            import com.tngtech.archunit.lang.ArchRule;
+            import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+            class ArchitectureRules {
+                @ArchTest
+                static final ArchRule assignable_types = classes().that().areNotEnums()
+                        .should().beAssignableTo /* gap */ ( "com.example.Base" );
             }
         """.trimIndent()
 }

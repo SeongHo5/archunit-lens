@@ -1,5 +1,6 @@
 package io.github.archunitlens.rules.evaluator
 
+import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiJavaFile
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -156,6 +157,10 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
             "src/test/java/com/example/web/PlainController.java",
             "package com.example.web; class PlainController {}",
         )
+        val implementation = addJavaClass(
+            "src/test/java/com/example/web/RemoteAdapterImpl.java",
+            "package com.example.web; class RemoteAdapterImpl {}",
+        )
         val anInterface = addJavaClass(
             "src/test/java/com/example/Port.java",
             "package com.example; interface Port {}",
@@ -165,16 +170,29 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
             "package com.example; enum State { OPEN }",
         )
 
-        assertPredicate("areAnnotatedWith(\"com.example.Required\")", annotated, "com.example.service", expected = true)
-        assertPredicate("areNotAnnotatedWith(\"com.example.Required\")", plain, "com.example.web", expected = true)
-        assertPredicate("resideInAnyPackage(\"..service..\", \"..api..\")", annotated, "com.example.service", expected = true)
-        assertPredicate("haveSimpleNameEndingWith(\"Service\")", annotated, "com.example.service", expected = true)
-        assertPredicate("haveSimpleNameNotEndingWith(\"Impl\")", annotated, "com.example.service", expected = true)
-        assertPredicate("areInterfaces()", anInterface, "com.example", expected = true)
-        assertPredicate("areNotInterfaces()", plain, "com.example.web", expected = true)
-        assertPredicate("areEnums()", anEnum, "com.example", expected = true)
-        assertPredicate("areNotEnums()", plain, "com.example.web", expected = true)
-        assertPredicate("resideInAPackage(\"..service..\")", plain, "com.example.web", expected = false)
+        val cases = listOf(
+            PredicateCase("areAnnotatedWith(\"com.example.Required\")", annotated, "com.example.service", plain, "com.example.web"),
+            PredicateCase("areNotAnnotatedWith(\"com.example.Required\")", plain, "com.example.web", annotated, "com.example.service"),
+            PredicateCase("resideInAPackage(\"..service..\")", annotated, "com.example.service", plain, "com.example.web"),
+            PredicateCase(
+                "resideInAnyPackage(\"..service..\", \"..api..\")",
+                annotated,
+                "com.example.service",
+                plain,
+                "com.example.web",
+            ),
+            PredicateCase("haveSimpleNameEndingWith(\"Service\")", annotated, "com.example.service", plain, "com.example.web"),
+            PredicateCase("haveSimpleNameNotEndingWith(\"Impl\")", plain, "com.example.web", implementation, "com.example.web"),
+            PredicateCase("areInterfaces()", anInterface, "com.example", plain, "com.example.web"),
+            PredicateCase("areNotInterfaces()", plain, "com.example.web", anInterface, "com.example"),
+            PredicateCase("areEnums()", anEnum, "com.example", plain, "com.example.web"),
+            PredicateCase("areNotEnums()", plain, "com.example.web", anEnum, "com.example"),
+        )
+
+        cases.forEach { case ->
+            assertPredicate(case.expression, case.matchingClass, case.matchingPackage, expected = true)
+            assertPredicate(case.expression, case.excludedClass, case.excludedPackage, expected = false)
+        }
     }
 
     fun testEvaluatesAndShouldViolationsIndependentlyInSourceOrder() {
@@ -365,4 +383,12 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
         path: String,
         code: String,
     ) = (myFixture.addFileToProject(path, code) as PsiJavaFile).classes.single()
+
+    private data class PredicateCase(
+        val expression: String,
+        val matchingClass: PsiClass,
+        val matchingPackage: String,
+        val excludedClass: PsiClass,
+        val excludedPackage: String,
+    )
 }

@@ -986,6 +986,76 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testUnresolvedClassLiteralsInExactHandlersProduceNoWarning() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Custom.java",
+            """
+                package com.example;
+
+                @com.example.missing.Proxy
+                public @interface Custom {}
+            """.trimIndent(),
+        )
+        addArchitectureRulesFixture("exactUnresolvedClassLiterals")
+        myFixture.configureByText(
+            "BrokenMapper.java",
+            """
+                package com.example.domain;
+
+                @com.example.missing.Required
+                @com.example.missing.Forbidden
+                class BrokenMapper {}
+
+                @com.example.Custom
+                interface BrokenPort {
+                    @com.example.Custom
+                    void call();
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testClassConventionPredicateExclusionProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule service_enums = classes().that()
+                            .resideInAPackage("..service..")
+                            .should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Outside.java", "package com.example.web; class Outside {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testDynamicClassPredicateArgumentProducesNoWarning() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    static String dynamicPackage = "..service..";
+                    @ArchTest static final ArchRule dynamic_predicate = classes().that()
+                            .resideInAnyPackage("..api..", dynamicPackage)
+                            .should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText("Candidate.java", "package com.example.api; class Candidate {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
     fun testDeferredCodeAccessRulesProduceNoWarning() {
         addArchitectureRulesFixture("deferredCodeAccess")
         myFixture.configureByText(

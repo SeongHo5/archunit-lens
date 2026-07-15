@@ -11,12 +11,15 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.roots.ProjectRootModificationTracker
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiClassObjectAccessExpression
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiManager
+import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiSearchHelper
 import com.intellij.psi.search.UsageSearchContext
 import com.intellij.psi.util.PsiModificationTracker
+import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.util.concurrent.atomic.AtomicReference
@@ -370,10 +373,10 @@ private const val NANOS_PER_MILLISECOND = 1_000_000
 
 private fun PsiJavaFile.textHashStamp(): Int = text.hashCode()
 
-private fun PsiJavaFile.requiresTypeResolution(): Boolean = CLASS_LITERAL_PATTERN.containsMatchIn(text) ||
-    text.contains("beAssignableTo(")
-
-private val CLASS_LITERAL_PATTERN = Regex("\\.class\\b")
+private fun PsiJavaFile.requiresTypeResolution(): Boolean = PsiTreeUtil
+    .findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null ||
+    PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
+        .any { it.methodExpression.referenceName == "beAssignableTo" }
 
 private fun DiscoveredArchRule.appliesToPackage(packageName: String): Boolean = liveRule?.appliesToPackage(packageName)
     ?: descriptor.scope.includes(packageName)

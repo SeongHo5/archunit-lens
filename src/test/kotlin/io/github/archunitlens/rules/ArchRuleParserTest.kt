@@ -2,8 +2,25 @@ package io.github.archunitlens.rules
 
 import com.intellij.psi.PsiFile
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import java.nio.file.Path
 
 class ArchRuleParserTest : BasePlatformTestCase() {
+    override fun setUp() {
+        super.setUp()
+        myFixture.addFileToProject(
+            "src/test/java/org/springframework/stereotype/Service.java",
+            "package org.springframework.stereotype; public @interface Service {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Service.java",
+            "package com.example; public @interface Service {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/QueryMapper.java",
+            "package com.example; public interface QueryMapper {}",
+        )
+    }
+
     fun testParsesPackageDependencyBanRule() {
         val rule = parseSingleRule(
             """
@@ -812,6 +829,53 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertTrue((discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnresolvedSymbol)
     }
 
+    fun testUnresolvedClassLiteralsKeepEveryTypeBearingExactHandlerMetadataOnly() {
+        val file = configureJava(testData("archrules/exactUnresolvedClassLiterals.java"))
+        val expectedReasons = mapOf(
+            "unresolved_forbidden_annotation" to
+                UnsupportedReason.UnresolvedSymbol("beAnnotatedWith", "com.example.missing.Forbidden"),
+            "unresolved_annotation_exclusivity" to
+                UnsupportedReason.UnresolvedSymbol("areAnnotatedWith", "com.example.missing.Required"),
+            "unresolved_interface_assignability" to
+                UnsupportedReason.UnresolvedSymbol("beAssignableTo", "com.example.missing.Base"),
+            "unresolved_class_meta_annotation" to
+                UnsupportedReason.UnresolvedSymbol("notBeMetaAnnotatedWith", "com.example.missing.Proxy"),
+            "unresolved_method_meta_annotation" to
+                UnsupportedReason.UnresolvedSymbol("notBeMetaAnnotatedWith", "com.example.missing.Proxy"),
+        )
+
+        val discoveries = ArchRuleSourceFinder.findInFile(file)
+            .mapNotNull(ArchRuleParser::discover)
+            .associateBy { it.ruleName }
+        assertEquals(expectedReasons.keys, discoveries.keys)
+        expectedReasons.forEach { (ruleName, expectedReason) ->
+            val discovered = discoveries.getValue(ruleName)
+            assertNull(discovered.liveRule)
+            assertEquals(expectedReason, (discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason)
+        }
+    }
+
+    fun testDynamicClassPredicateArgumentMakesWholeFallbackMetadataOnly() {
+        val discovered = discoverSingleRule(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ArchitectureRules {
+                    static String dynamicPackage = "..service..";
+                    @ArchTest static final ArchRule dynamic_predicate = classes().that()
+                            .resideInAnyPackage("..api..", dynamicPackage)
+                            .should().beEnums();
+                }
+            """.trimIndent(),
+        )
+
+        assertNull(discovered.liveRule)
+        val status = discovered.descriptor.supportStatus as SupportStatus.Unsupported
+        assertTrue(status.reason is UnsupportedReason.UnsupportedArgument)
+    }
+
     fun testDeferredDeclarationAndCodeAccessRulesStayMetadataOnly() {
         val rules = listOf(
             exactRule(
@@ -1021,4 +1085,6 @@ class ArchRuleParserTest : BasePlatformTestCase() {
     }
 
     private fun configureJava(code: String): PsiFile = myFixture.configureByText("ArchitectureRules.java", code)
+
+    private fun testData(path: String): String = Path.of("src/test/testData", path).toFile().readText()
 }

@@ -78,10 +78,9 @@ object ArchRuleParser {
     ): ExactHandlerDecision {
         if (!family.owns(calls)) return ExactHandlerDecision.NotApplicable
         calls.validateStaticArguments()?.let { reason ->
-            val stableReason = if (
-                family == ExactHandlerFamily.CLASS_META_ANNOTATION ||
+            val metaAnnotationFamily = family == ExactHandlerFamily.CLASS_META_ANNOTATION ||
                 family == ExactHandlerFamily.METHOD_META_ANNOTATION
-            ) {
+            val stableReason = if (metaAnnotationFamily && reason !is UnsupportedReason.UnresolvedSymbol) {
                 UnsupportedReason.CustomOrMetaAnnotationPredicates
             } else {
                 reason
@@ -441,7 +440,11 @@ object ArchRuleParser {
                 val unsupported = call.arguments.firstOrNull {
                     it !is RawArgument.StringLiteral && it !is RawArgument.ClassLiteral
                 }
-                return unsupported?.let { UnsupportedReason.UnsupportedArgument(call.name, it.position, it.kindName()) }
+                unsupported?.let { return UnsupportedReason.UnsupportedArgument(call.name, it.position, it.kindName()) }
+                return call.arguments
+                    .filterIsInstance<RawArgument.ClassLiteral>()
+                    .firstOrNull { it.resolvedQualifiedName == null }
+                    ?.let { UnsupportedReason.UnresolvedSymbol(call.name, it.canonicalName) }
             }
         }
     }
