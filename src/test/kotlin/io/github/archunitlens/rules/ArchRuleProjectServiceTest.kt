@@ -1,5 +1,6 @@
 package io.github.archunitlens.rules
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.psi.PsiDocumentManager
@@ -7,8 +8,61 @@ import com.intellij.psi.PsiFile
 import com.intellij.testFramework.DumbModeTestUtils
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.settings.ArchUnitLensSettings
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class ArchRuleProjectServiceTest : BasePlatformTestCase() {
+    fun testDiscoveriesRequireReadAccess() {
+        val service = project.service<ArchRuleProjectService>()
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val failure = executor.submit<Throwable?> {
+                runCatching { service.discoveries() }.exceptionOrNull()
+            }.get(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+
+            assertTrue(failure is AssertionError)
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    fun testConcurrentReadActionsPublishCompletePackageLookupSnapshot() {
+        addArchitectureRules(
+            "ArchitectureRules.java",
+            classSuffixRule("Controller"),
+        )
+
+        val service = project.service<ArchRuleProjectService>()
+        val readersReady = CountDownLatch(2)
+        val startReaders = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val snapshots = (1..2).map {
+                executor.submit<ArchRuleDiscoverySnapshot> {
+                    ApplicationManager.getApplication().runReadAction<ArchRuleDiscoverySnapshot> {
+                        readersReady.countDown()
+                        check(startReaders.await(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                        service.discoverySnapshot("com.example.controller")
+                    }
+                }
+            }
+            assertTrue(readersReady.await(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            startReaders.countDown()
+
+            snapshots.map { it.get(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS) }.forEach { snapshot ->
+                assertEquals(listOf("controller_classes_should_end_with_controller"), snapshot.discoveries.map { it.ruleName })
+                assertEquals(1, snapshot.scanMetrics.packageLookupCacheEntries)
+            }
+            val metrics = service.scanMetrics()
+            assertEquals(1, metrics.packageLookupCacheEntries)
+            assertEquals(2, metrics.packageLookupCacheHits + metrics.packageLookupCacheMisses)
+        } finally {
+            startReaders.countDown()
+            executor.shutdownNow()
+        }
+    }
+
     fun testDiscoverySkipsOrdinaryJavaFilesAndReusesUnchangedRuleFileCache() {
         addArchitectureRules(
             "ArchitectureRules.java",
@@ -310,3 +364,5 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
             }
         """.trimIndent()
 }
+
+private const val TEST_TIMEOUT_SECONDS = 10L
