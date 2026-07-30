@@ -5,6 +5,17 @@ import com.intellij.psi.PsiExpression
 import com.intellij.psi.PsiImportStatement
 import com.intellij.psi.PsiJavaFile
 
+private val ARCHUNIT_SUBJECT_ENTRY_POINTS = setOf(
+    "classes",
+    "noClasses",
+    "theClass",
+    "members",
+    "fields",
+    "codeUnits",
+    "constructors",
+    "methods",
+)
+
 internal enum class ExactHandlerFamily {
     PACKAGE_DEPENDENCY_BAN,
     CLASS_NAME_SUFFIX,
@@ -38,24 +49,49 @@ object ArchRuleParser {
         fun normalize(
             source: ArchRuleSource,
             calls: List<RawCall>,
-        ): DiscoveredArchRule = when (val decision = routeExactHandlers(source, calls) { parseClassConvention(source, calls) }) {
-            is ExactHandlerDecision.Matched -> DiscoveredArchRule(
-                ruleName = source.ruleName,
-                descriptor = decision.rule.toDescriptor(calls, source),
-                liveRule = decision.rule,
-            )
-            is ExactHandlerDecision.Unsupported -> DiscoveredArchRule(
-                ruleName = source.ruleName,
-                descriptor = unsupportedDescriptor(source, calls, decision.reason),
-                liveRule = null,
-            )
-            ExactHandlerDecision.NotApplicable -> DiscoveredArchRule(
-                ruleName = source.ruleName,
-                descriptor = unsupportedDescriptor(source, calls),
-                liveRule = null,
-            )
+        ): DiscoveredArchRule {
+            calls.helperBackedCustomCondition()?.let { helper ->
+                return DiscoveredArchRule(
+                    ruleName = source.ruleName,
+                    descriptor = unsupportedDescriptor(
+                        source = source,
+                        calls = calls,
+                        reason = UnsupportedReason.HelperBackedCustomCondition,
+                        condition = ConditionExpr.Leaf(helper.conditionMarker()),
+                    ),
+                    liveRule = null,
+                )
+            }
+
+            return when (val decision = routeExactHandlers(source, calls) { parseClassConvention(source, calls) }) {
+                is ExactHandlerDecision.Matched -> DiscoveredArchRule(
+                    ruleName = source.ruleName,
+                    descriptor = decision.rule.toDescriptor(calls, source),
+                    liveRule = decision.rule,
+                )
+                is ExactHandlerDecision.Unsupported -> DiscoveredArchRule(
+                    ruleName = source.ruleName,
+                    descriptor = unsupportedDescriptor(source, calls, decision.reason),
+                    liveRule = null,
+                )
+                ExactHandlerDecision.NotApplicable -> DiscoveredArchRule(
+                    ruleName = source.ruleName,
+                    descriptor = unsupportedDescriptor(source, calls),
+                    liveRule = null,
+                )
+            }
         }
     }
+
+    private fun List<RawCall>.helperBackedCustomCondition(): RawArgument.NestedCall? {
+        if (firstOrNull()?.name !in ARCHUNIT_SUBJECT_ENTRY_POINTS) return null
+        val shouldIndex = indexOfFirst { it.name == "should" }
+        if (shouldIndex < 0 || count { it.name == "should" } != 1) return null
+        if (drop(shouldIndex + 1).withoutTrailingBecauseCall().isNotEmpty()) return null
+        return get(shouldIndex).arguments.singleOrNull() as? RawArgument.NestedCall
+    }
+
+    private fun RawArgument.NestedCall.conditionMarker(): String = "${methodName ?: "helper"}()"
 
     internal fun routeExactHandlers(
         source: ArchRuleSource,
@@ -592,13 +628,16 @@ object ArchRuleParser {
         source: ArchRuleSource,
         calls: List<RawCall>,
         reason: UnsupportedReason = calls.unsupportedReason(),
+        condition: ConditionExpr = ConditionExpr.Leaf(
+            calls.dropAfterShould().withoutTrailingBecauseCall().joinToString(".") { it.name }.ifBlank { "unknown" },
+        ),
     ): RuleDescriptor = RuleDescriptor(
         subject = calls.subjectKind(),
         sourcePointer = source.fieldPointer,
         scope = source.analyzeScope,
         predicate = calls.predicateExpr(source.initializer)
             ?: PredicateExpr.Leaf(calls.takeUntilShould().joinToString(".") { it.name }.ifBlank { "unknown" }),
-        condition = ConditionExpr.Leaf(calls.dropAfterShould().joinToString(".") { it.name }.ifBlank { "unknown" }),
+        condition = condition,
         reason = calls.reason(),
         supportStatus = SupportStatus.Unsupported(reason),
     )
@@ -708,7 +747,7 @@ object ArchRuleParser {
 
     private fun List<RawCall>.unsupportedReason(): UnsupportedReason = when {
         any { it.name == "notBeMetaAnnotatedWith" } -> UnsupportedReason.CustomOrMetaAnnotationPredicates
-        firstOrNull()?.name !in setOf("classes", "noClasses", "theClass", "members", "fields", "codeUnits", "constructors", "methods") ->
+        firstOrNull()?.name !in ARCHUNIT_SUBJECT_ENTRY_POINTS ->
             UnsupportedReason.UnsupportedEntryPoint(firstOrNull()?.name ?: "unknown")
         any { it.name == "resideInAnyPackage" } -> UnsupportedReason.UnsupportedMultiPackageRuleShape
         else -> UnsupportedReason.UnsupportedOrAmbiguousRuleChain

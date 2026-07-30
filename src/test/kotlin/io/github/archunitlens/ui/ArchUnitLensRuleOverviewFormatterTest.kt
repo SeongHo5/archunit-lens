@@ -5,6 +5,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.DiscoveredArchRule
+import java.nio.file.Path
 
 class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
     fun testFormatsSupportedAndUnsupportedDiscoveriesWithScanMetrics() {
@@ -101,6 +102,64 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         assertFalse(output.contains(ArchUnitLensBundle.message("overview.unsupported.multiPackageRuleShape")))
     }
 
+    fun testFormatsHelperBackedCustomConditionsWithoutTreatingBecauseAsCondition() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/HelperBackedCustomConditions.java",
+            testData("archrules/helperBackedCustomConditions.java"),
+        )
+
+        val service = project.service<ArchRuleProjectService>()
+        val output = ArchUnitLensRuleOverviewFormatter.render(
+            discoveries = service.discoveries().toOverviewItems("HelperBackedCustomConditions.java"),
+            metrics = service.scanMetrics(),
+        )
+        val unsupportedStatus = statusLine(
+            ArchUnitLensBundle.message(
+                "overview.status.unsupported",
+                ArchUnitLensBundle.message("overview.unsupported.helperBackedCustomCondition"),
+            ),
+        )
+
+        assertEquals(4, output.lineSequence().count { it.trim() == unsupportedStatus })
+        val expected = mapOf(
+            "class_helper_condition" to
+                Triple(ArchUnitLensBundle.message("overview.subject.classes"), "customClassCondition()", "class invariant"),
+            "method_helper_condition" to
+                Triple(ArchUnitLensBundle.message("overview.subject.methods"), "customMethodCondition()", "method invariant"),
+            "constructor_helper_condition" to Triple(
+                ArchUnitLensBundle.message("overview.subject.constructors"),
+                "customConstructorCondition()",
+                "constructor invariant",
+            ),
+            "field_helper_condition" to
+                Triple(ArchUnitLensBundle.message("overview.subject.fields"), "customFieldCondition()", "field invariant"),
+        )
+        expected.forEach { (ruleName, metadata) ->
+            val ruleOutput = output.substringAfter(ruleName).substringBefore("\n\n")
+            assertTrue(ruleOutput.lineSequence().any { it.trim() == unsupportedStatus })
+            assertTrue(
+                ruleOutput.lineSequence().any {
+                    it.trim() == ArchUnitLensBundle.message("overview.subject", metadata.first)
+                },
+            )
+            assertTrue(
+                ruleOutput.lineSequence().any {
+                    it.trim() == ArchUnitLensBundle.message("overview.condition", metadata.second)
+                },
+            )
+            assertTrue(
+                ruleOutput.lineSequence().any {
+                    it.trim() == ArchUnitLensBundle.message("overview.reason", metadata.third)
+                },
+            )
+        }
+        assertFalse(
+            output.lineSequence().any {
+                it.trim() == ArchUnitLensBundle.message("overview.condition", "because")
+            },
+        )
+    }
+
     fun testAppliesOverviewFiltersWithoutChangingDiscoverySource() {
         myFixture.addFileToProject(
             "src/test/java/com/example/ArchitectureRules.java",
@@ -151,4 +210,6 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
     private fun scanLabelPrefix(): String = ArchUnitLensBundle
         .message("overview.scan", "", "", "", "", "", "", "", "", "", "", "")
         .substringBefore(" ")
+
+    private fun testData(path: String): String = Path.of("src/test/testData", path).toFile().readText()
 }

@@ -221,6 +221,9 @@ internal object ArchUnitLensRuleOverviewFormatter {
         UnsupportedReason.CustomOrMetaAnnotationPredicates -> ArchUnitLensBundle.message(
             "overview.unsupported.customOrMetaAnnotationPredicates",
         )
+        UnsupportedReason.HelperBackedCustomCondition -> ArchUnitLensBundle.message(
+            "overview.unsupported.helperBackedCustomCondition",
+        )
         is UnsupportedReason.UnsupportedEntryPoint -> ArchUnitLensBundle.message("overview.unsupported.entryPoint", entryPoint)
         is UnsupportedReason.InvalidArity -> ArchUnitLensBundle.message(
             "overview.unsupported.invalidArity",

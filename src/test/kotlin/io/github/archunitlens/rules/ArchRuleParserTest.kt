@@ -614,6 +614,33 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertTrue(discovered.descriptor.supportStatus is SupportStatus.Unsupported)
     }
 
+    fun testHelperBackedCustomConditionsHaveStableMetadataAcrossSubjects() {
+        val file = configureJava(testData("archrules/helperBackedCustomConditions.java"))
+        val discoveries = ArchRuleSourceFinder.findInFile(file)
+            .mapNotNull(ArchRuleParser::discover)
+            .associateBy { it.ruleName }
+        val expected = mapOf(
+            "class_helper_condition" to Triple(SubjectKind.Classes, "customClassCondition()", "class invariant"),
+            "method_helper_condition" to Triple(SubjectKind.Methods, "customMethodCondition()", "method invariant"),
+            "constructor_helper_condition" to
+                Triple(SubjectKind.Constructors, "customConstructorCondition()", "constructor invariant"),
+            "field_helper_condition" to Triple(SubjectKind.Fields, "customFieldCondition()", "field invariant"),
+        )
+
+        assertEquals(expected.keys, discoveries.keys)
+        expected.forEach { (ruleName, metadata) ->
+            val discovered = discoveries.getValue(ruleName)
+            assertNull(discovered.liveRule)
+            assertEquals(metadata.first, discovered.descriptor.subject)
+            assertEquals(ConditionExpr.Leaf(metadata.second), discovered.descriptor.condition)
+            assertEquals(metadata.third, discovered.descriptor.reason)
+            assertEquals(
+                SupportStatus.Unsupported(UnsupportedReason.HelperBackedCustomCondition),
+                discovered.descriptor.supportStatus,
+            )
+        }
+    }
+
     fun testUnqualifiedForbiddenAnnotationWithoutImportIsUnsupported() {
         val source = findSingleSource(
             """

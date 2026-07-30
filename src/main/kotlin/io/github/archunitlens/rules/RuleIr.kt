@@ -62,6 +62,7 @@ sealed interface SupportStatus {
 sealed interface UnsupportedReason {
     data object UnsupportedMultiPackageRuleShape : UnsupportedReason
     data object CustomOrMetaAnnotationPredicates : UnsupportedReason
+    data object HelperBackedCustomCondition : UnsupportedReason
     data class UnsupportedEntryPoint(val entryPoint: String) : UnsupportedReason
     data class InvalidArity(
         val methodName: String,

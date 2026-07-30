@@ -763,6 +763,29 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testHelperBackedCustomConditionRemainsMetadataOnlyWithoutWarning() {
+        addArchitectureRulesFixture("helperBackedCustomConditions")
+
+        myFixture.configureByText(
+            "BrokenMapper.java",
+            """
+                package com.example.mapper;
+
+                class BrokenMapper {
+                    Object state;
+
+                    BrokenMapper() {
+                    }
+
+                    void map() {
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
     fun testClassConventionReportsIndependentAndShouldViolations() {
         myFixture.addFileToProject(
             "src/test/java/com/example/Mapper.java",
