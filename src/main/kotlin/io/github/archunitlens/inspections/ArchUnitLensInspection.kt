@@ -96,6 +96,7 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             }
 
             override fun visitReferenceElement(reference: PsiJavaCodeReferenceElement) {
+                if (dependencyRules.isEmpty()) return
                 if (PsiTreeUtil.getParentOfType(reference, PsiImportStatement::class.java) != null) return
                 val targetClass = reference.resolve() as? PsiClass ?: return
                 val targetQualifiedName = targetClass.qualifiedName ?: return

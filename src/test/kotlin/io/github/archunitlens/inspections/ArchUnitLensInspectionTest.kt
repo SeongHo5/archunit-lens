@@ -2,16 +2,24 @@ package io.github.archunitlens.inspections
 
 import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.codeInsight.intention.LowPriorityAction
+import com.intellij.codeInspection.InspectionManager
+import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiJavaCodeReferenceElement
+import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.SmartPointerManager
+import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.AnalyzeScope
+import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.ClassNameSuffixRule
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
+import io.github.archunitlens.rules.PackageDependencyBanRule
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.nio.file.Path
 
@@ -68,6 +76,45 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         } finally {
             state.dependencyRulesEnabled = original
         }
+    }
+
+    fun testClassOnlyRulesDoNotResolveJavaReferences() {
+        addControllerSuffixRule()
+        val file = myFixture.configureByText(
+            "OrderController.java",
+            """
+                package com.example.presentation.controller;
+
+                import java.util.List;
+
+                class OrderController {
+                    private List<String> orders;
+                }
+            """.trimIndent(),
+        ) as PsiJavaFile
+        val activeRules = project
+            .service<ArchRuleProjectService>()
+            .rulesForPackage(file.packageName)
+        assertTrue(activeRules.any { it is ClassNameSuffixRule })
+        assertFalse(activeRules.any { it is PackageDependencyBanRule })
+
+        val references = PsiTreeUtil.findChildrenOfType(file, PsiJavaCodeReferenceElement::class.java)
+        assertTrue(references.isNotEmpty())
+
+        val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+        val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+        var resolutionCount = 0
+        references.forEach { reference ->
+            val countingReference = object : PsiJavaCodeReferenceElement by reference {
+                override fun resolve(): PsiElement? {
+                    resolutionCount += 1
+                    return reference.resolve()
+                }
+            }
+            visitor.visitReferenceElement(countingReference)
+        }
+
+        assertEquals(0, resolutionCount)
     }
 
     fun testGoToArchUnitRuleQuickFixNavigatesToRuleFile() {
