@@ -1,5 +1,15 @@
 # ArchUnit Lens Changelog
 
+## [0.2.1] - 2026-07-31
+
+Patch release focused on accurate meta-annotation warnings, clearer custom-condition metadata, and leaner editor inspections.
+
+### Fixed
+
+- Matched direct and transitively composed meta-annotations with cycle-safe traversal while keeping unresolved paths warning-free.
+- Reported helper-backed custom `ArchCondition` rules with stable metadata, the helper condition name, and separate `.because(...)` reason text without enabling live warnings.
+- Skipped Java reference resolution when no enabled package-dependency rule applies, reducing unnecessary editor hot-path work.
+
 ## [0.2.0] - 2026-07-16
 
 Minor release focused on live editor feedback for statically provable Java class conventions.

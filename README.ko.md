@@ -40,7 +40,7 @@ static final ArchRule mapperAnnotationMustBeExclusive =
         .because("Mapper annotations must be exclusive.");
 ```
 
-## 0.2.0 지원 범위
+## 0.2.1 지원 범위
 
 ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live warning으로 표시합니다. 지원하지 않거나 의미가 불확실한 DSL chain은 가능한 경우 Rule Overview metadata로만 보존하며 live warning을 만들지 않습니다. canonical 지원 범위는 [`docs/rule-support-matrix.md`](docs/rule-support-matrix.md)입니다.
 
@@ -53,7 +53,7 @@ ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live wa
 - positive/negative annotation, single/any package, suffix/not-suffix, interface/non-interface, enum/non-enum 조건으로 구성한 static class convention
 - 모든 leaf가 정적으로 지원될 때 left-associative class predicate `and()` / `or()`와 독립적인 `andShould()` condition
 - `beAssignableTo(...)` 대상이 resolve되는 QueryMapper 형태 interface rule
-- literal class/method meta-annotation rule
+- direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule
 - `@AnalyzeClasses(packages = ...)` scope와 `.because("...")` reason 표시
 
 ## Rule Overview
@@ -89,7 +89,7 @@ ArchUnit Lens는 ArchUnit rule이나 사용자/프로젝트 코드를 실행하�
 
 ## 호환성과 로컬 개발
 
-- 플러그인 버전: `0.2.0`
+- 플러그인 버전: `0.2.1`
 - Gradle toolchain과 GitHub Actions CI: JDK 21 사용
 - ArchUnit reference source는 `gradle.properties`의 `archUnit.reference.version`으로 고정하고 로컬 DSL 분석용으로만 풀어둡니다. ArchUnit은 플러그인 compile/runtime classpath에 올라가지 않습니다.
 
