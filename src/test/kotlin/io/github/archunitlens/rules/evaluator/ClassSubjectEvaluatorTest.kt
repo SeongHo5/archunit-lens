@@ -11,6 +11,7 @@ import io.github.archunitlens.rules.ClassConventionRule
 import io.github.archunitlens.rules.ClassMetaAnnotationRule
 import io.github.archunitlens.rules.ClassNameSuffixRule
 import io.github.archunitlens.rules.InterfaceNamingRule
+import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 
 class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
@@ -96,26 +97,8 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
         assertTrue(ClassSubjectEvaluator.isMissingAssignableType(badMapper, interfaceRule))
     }
 
-    fun testEvaluatesMetaAnnotationCondition() {
-        myFixture.addFileToProject(
-            "src/test/java/com/example/Proxy.java",
-            """
-                package com.example;
-
-                public @interface Proxy {
-                }
-            """.trimIndent(),
-        )
-        myFixture.addFileToProject(
-            "src/test/java/com/example/Transactional.java",
-            """
-                package com.example;
-
-                @com.example.Proxy
-                public @interface Transactional {
-                }
-            """.trimIndent(),
-        )
+    fun testEvaluatesClassMetaAnnotationConditionRecursively() {
+        addMetaAnnotationGraph()
         val rule = parseRule<ClassMetaAnnotationRule>(
             """
                 import com.tngtech.archunit.junit.ArchTest;
@@ -134,14 +117,62 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
             """
                 package com.example;
 
+                @com.example.Proxy
                 @com.example.Transactional
+                @com.example.ComposedTransactional
+                @com.example.DeepComposedTransactional
+                @com.example.CyclicProxyA
+                @com.example.CyclicUnrelatedA
+                @com.example.Unrelated
+                @com.example.missing.Unresolved
                 interface RemoteGateway {
                 }
             """.trimIndent(),
         )
-        val annotation = gateway.modifierList!!.annotations.single()
 
-        assertTrue(ClassSubjectEvaluator.isForbiddenMetaAnnotation(annotation, rule))
+        assertMetaAnnotationResults(gateway.modifierList!!.annotations) { annotation ->
+            ClassSubjectEvaluator.isForbiddenMetaAnnotation(annotation, rule)
+        }
+    }
+
+    fun testEvaluatesMethodMetaAnnotationConditionRecursively() {
+        addMetaAnnotationGraph()
+        val rule = parseRule<MethodMetaAnnotationRule>(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
+
+                class ArchitectureRules {
+                    @ArchTest
+                    static final ArchRule interface_method_proxy_annotations_are_forbidden =
+                            methods().that().areDeclaredInClassesThat().areInterfaces()
+                                    .should().notBeMetaAnnotatedWith("com.example.Proxy");
+                }
+            """.trimIndent(),
+        )
+        val gateway = addJavaClass(
+            "src/test/java/com/example/RemoteGateway.java",
+            """
+                package com.example;
+
+                interface RemoteGateway {
+                    @com.example.Proxy
+                    @com.example.Transactional
+                    @com.example.ComposedTransactional
+                    @com.example.DeepComposedTransactional
+                    @com.example.CyclicProxyA
+                    @com.example.CyclicUnrelatedA
+                    @com.example.Unrelated
+                    @com.example.missing.Unresolved
+                    void execute();
+                }
+            """.trimIndent(),
+        )
+
+        assertMetaAnnotationResults(gateway.methods.single().modifierList.annotations) { annotation ->
+            ClassSubjectEvaluator.isForbiddenMetaAnnotation(annotation, rule)
+        }
     }
 
     fun testEvaluatesStaticClassPredicateLeaves() {
@@ -383,6 +414,55 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
         path: String,
         code: String,
     ) = (myFixture.addFileToProject(path, code) as PsiJavaFile).classes.single()
+
+    private fun addMetaAnnotationGraph() {
+        addAnnotation("Proxy")
+        addAnnotation("Transactional", "@com.example.Proxy")
+        addAnnotation("ComposedTransactional", "@com.example.Transactional")
+        addAnnotation("DeepComposedTransactional", "@com.example.ComposedTransactional")
+        addAnnotation("CyclicProxyA", "@com.example.CyclicProxyB")
+        addAnnotation("CyclicProxyB", "@com.example.CyclicProxyA\n@com.example.Proxy")
+        addAnnotation("CyclicUnrelatedA", "@com.example.CyclicUnrelatedB")
+        addAnnotation("CyclicUnrelatedB", "@com.example.CyclicUnrelatedA")
+        addAnnotation("Unrelated")
+    }
+
+    private fun addAnnotation(
+        simpleName: String,
+        annotations: String = "",
+    ) {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/$simpleName.java",
+            """
+                package com.example;
+
+                $annotations
+                public @interface $simpleName {
+                }
+            """.trimIndent(),
+        )
+    }
+
+    private fun assertMetaAnnotationResults(
+        annotations: Array<com.intellij.psi.PsiAnnotation>,
+        matches: (com.intellij.psi.PsiAnnotation) -> Boolean,
+    ) {
+        val expected = mapOf(
+            "Proxy" to true,
+            "Transactional" to true,
+            "ComposedTransactional" to true,
+            "DeepComposedTransactional" to true,
+            "CyclicProxyA" to true,
+            "CyclicUnrelatedA" to false,
+            "Unrelated" to false,
+            "Unresolved" to false,
+        )
+
+        annotations.forEach { annotation ->
+            val simpleName = annotation.nameReferenceElement?.referenceName ?: error("Expected annotation name")
+            assertEquals(simpleName, expected.getValue(simpleName), matches(annotation))
+        }
+    }
 
     private data class PredicateCase(
         val expression: String,
