@@ -9,6 +9,7 @@ import com.intellij.testFramework.DumbModeTestUtils
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.settings.ArchUnitLensSettings
+import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -255,6 +256,35 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertTrue(service.discoveriesForPackage("com.other.api").isEmpty())
     }
 
+    fun testHelperBackedCustomConditionsStayMetadataOnlyInPackageLookup() {
+        addArchitectureRules(
+            "HelperBackedCustomConditions.java",
+            testData("archrules/helperBackedCustomConditions.java"),
+        )
+
+        val service = project.service<ArchRuleProjectService>()
+        val discoveries = service.discoveriesForPackage("com.example.mapper")
+
+        assertEquals(
+            setOf(
+                "class_helper_condition",
+                "method_helper_condition",
+                "constructor_helper_condition",
+                "field_helper_condition",
+            ),
+            discoveries.map { it.ruleName }.toSet(),
+        )
+        assertTrue(discoveries.all { it.liveRule == null })
+        assertTrue(
+            discoveries.all {
+                it.descriptor.supportStatus ==
+                    SupportStatus.Unsupported(UnsupportedReason.HelperBackedCustomCondition)
+            },
+        )
+        assertTrue(service.rulesForPackage("com.example.mapper").isEmpty())
+        assertTrue(service.discoveriesForPackage("com.other.mapper").isEmpty())
+    }
+
     fun testDumbModeUsesCachedDiscoveriesAndMarksStaleFallback() {
         addArchitectureRules(
             "ArchitectureRules.java",
@@ -392,6 +422,8 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         fileName: String,
         code: String,
     ): PsiFile = myFixture.addFileToProject("src/test/java/com/example/$fileName", code)
+
+    private fun testData(path: String): String = Path.of("src/test/testData", path).toFile().readText()
 
     private fun classSuffixRule(
         requiredSuffix: String,
