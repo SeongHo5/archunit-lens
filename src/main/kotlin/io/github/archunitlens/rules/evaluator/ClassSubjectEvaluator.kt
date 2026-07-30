@@ -113,16 +113,26 @@ object ClassSubjectEvaluator {
         rule: MethodMetaAnnotationRule,
     ): Boolean = annotation.isMetaAnnotatedWith(rule.forbiddenMetaAnnotationQualifiedName)
 
-    private fun PsiAnnotation.isMetaAnnotatedWith(qualifiedName: String): Boolean {
+    private fun PsiAnnotation.isMetaAnnotatedWith(qualifiedName: String): Boolean = isMetaAnnotatedWith(qualifiedName, mutableSetOf())
+
+    private fun PsiAnnotation.isMetaAnnotatedWith(
+        qualifiedName: String,
+        visitedAnnotationTypes: MutableSet<String>,
+    ): Boolean {
+        if (this.qualifiedName == qualifiedName) return true
+
         val annotationClass = resolveAnnotationType()
             ?: this.qualifiedName
                 ?.let { JavaPsiFacade.getInstance(project).findClass(it, resolveScope) }
-        return annotationClass
-            ?.modifierList
+            ?: return false
+        val annotationQualifiedName = annotationClass.qualifiedName ?: return false
+        if (!visitedAnnotationTypes.add(annotationQualifiedName)) return false
+        if (annotationQualifiedName == qualifiedName) return true
+
+        return annotationClass.modifierList
             ?.annotations
             ?.any { metaAnnotation ->
-                metaAnnotation.qualifiedName == qualifiedName ||
-                    metaAnnotation.resolveAnnotationType()?.qualifiedName == qualifiedName
+                metaAnnotation.isMetaAnnotatedWith(qualifiedName, visitedAnnotationTypes)
             } == true
     }
 

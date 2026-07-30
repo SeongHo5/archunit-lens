@@ -670,24 +670,42 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
-    fun testClassMetaAnnotationRuleHighlightsOnlyInterfaces() {
+    fun testClassMetaAnnotationRuleMatchesDirectAndRecursiveAnnotations() {
         addArchitectureRulesFixture("literalClassMetaAnnotation")
         addProxyAnnotationStubs()
 
-        myFixture.configureByText(
-            "RemoteGateway.java",
-            """
-                package com.example.api;
-
-                import com.example.Transactional;
-
-                @Transactional
-                interface RemoteGateway {
-                }
-            """.trimIndent(),
+        val cases = listOf(
+            "com.example.Proxy" to true,
+            "com.example.Transactional" to true,
+            "com.example.ComposedTransactional" to true,
+            "com.example.DeepComposedTransactional" to true,
+            "com.example.CyclicProxyA" to true,
+            "com.example.CyclicUnrelatedA" to false,
+            "com.example.Unrelated" to false,
+            "com.example.missing.Unresolved" to false,
         )
-        assertTrue(warningDescriptions().contains(problemMessage("proxy_annotations_belong_on_concrete_classes")))
+        cases.forEach { (annotation, expectedWarning) ->
+            myFixture.configureByText(
+                "RemoteGateway.java",
+                """
+                    package com.example.api;
 
+                    @$annotation
+                    interface RemoteGateway {
+                    }
+                """.trimIndent(),
+            )
+            assertEquals(
+                annotation,
+                if (expectedWarning) listOf(problemMessage("proxy_annotations_belong_on_concrete_classes")) else emptyList(),
+                warningDescriptions(),
+            )
+        }
+    }
+
+    fun testClassMetaAnnotationRuleHighlightsOnlyInterfaces() {
+        addArchitectureRulesFixture("literalClassMetaAnnotation")
+        addProxyAnnotationStubs()
         myFixture.configureByText(
             "RemoteGatewayImpl.java",
             """
@@ -703,29 +721,43 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
-    fun testMethodMetaAnnotationRuleHighlightsOnlyInterfaceMethods() {
+    fun testMethodMetaAnnotationRuleMatchesDirectAndRecursiveAnnotations() {
         addArchitectureRulesFixture("literalMethodMetaAnnotation")
         addProxyAnnotationStubs()
 
-        myFixture.configureByText(
-            "RemoteGateway.java",
-            """
-                package com.example.api;
-
-                import com.example.Transactional;
-
-                interface RemoteGateway {
-                    @Transactional
-                    void execute();
-                }
-            """.trimIndent(),
+        val cases = listOf(
+            "com.example.Proxy" to true,
+            "com.example.Transactional" to true,
+            "com.example.ComposedTransactional" to true,
+            "com.example.DeepComposedTransactional" to true,
+            "com.example.CyclicProxyA" to true,
+            "com.example.CyclicUnrelatedA" to false,
+            "com.example.Unrelated" to false,
+            "com.example.missing.Unresolved" to false,
         )
-        assertTrue(
-            warningDescriptions().contains(
-                problemMessage("interface_methods_must_not_have_proxy_annotations"),
-            ),
-        )
+        cases.forEach { (annotation, expectedWarning) ->
+            myFixture.configureByText(
+                "RemoteGateway.java",
+                """
+                    package com.example.api;
 
+                    interface RemoteGateway {
+                        @$annotation
+                        void execute();
+                    }
+                """.trimIndent(),
+            )
+            assertEquals(
+                annotation,
+                if (expectedWarning) listOf(problemMessage("interface_methods_must_not_have_proxy_annotations")) else emptyList(),
+                warningDescriptions(),
+            )
+        }
+    }
+
+    fun testMethodMetaAnnotationRuleHighlightsOnlyInterfaceMethods() {
+        addArchitectureRulesFixture("literalMethodMetaAnnotation")
+        addProxyAnnotationStubs()
         myFixture.configureByText(
             "RemoteGatewayImpl.java",
             """
@@ -1264,22 +1296,28 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
     }
 
     private fun addProxyAnnotationStubs() {
+        addAnnotationStub("Proxy")
+        addAnnotationStub("Transactional", "@com.example.Proxy")
+        addAnnotationStub("ComposedTransactional", "@com.example.Transactional")
+        addAnnotationStub("DeepComposedTransactional", "@com.example.ComposedTransactional")
+        addAnnotationStub("CyclicProxyA", "@com.example.CyclicProxyB")
+        addAnnotationStub("CyclicProxyB", "@com.example.CyclicProxyA\n@com.example.Proxy")
+        addAnnotationStub("CyclicUnrelatedA", "@com.example.CyclicUnrelatedB")
+        addAnnotationStub("CyclicUnrelatedB", "@com.example.CyclicUnrelatedA")
+        addAnnotationStub("Unrelated")
+    }
+
+    private fun addAnnotationStub(
+        simpleName: String,
+        annotations: String = "",
+    ) {
         myFixture.addFileToProject(
-            "src/test/java/com/example/Proxy.java",
+            "src/test/java/com/example/$simpleName.java",
             """
                 package com.example;
 
-                public @interface Proxy {
-                }
-            """.trimIndent(),
-        )
-        myFixture.addFileToProject(
-            "src/test/java/com/example/Transactional.java",
-            """
-                package com.example;
-
-                @com.example.Proxy
-                public @interface Transactional {
+                $annotations
+                public @interface $simpleName {
                 }
             """.trimIndent(),
         )
