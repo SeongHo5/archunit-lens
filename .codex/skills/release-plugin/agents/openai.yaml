@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Plugin"
+  short_description: "Prepare, tag, and publish a plugin release"
+  default_prompt: "Use $release-plugin to cut and publish the next ArchUnit Lens release."

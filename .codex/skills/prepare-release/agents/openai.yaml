@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare Release"
+  short_description: "Prepare ArchUnit Lens release PRs"
+  default_prompt: "Use $prepare-release to prepare the next ArchUnit Lens release PR."
