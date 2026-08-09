@@ -12,6 +12,7 @@ import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiMethodCallExpression
+import com.intellij.psi.PsiNewExpression
 import com.intellij.psi.PsiReferenceExpression
 import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.util.PsiTreeUtil
@@ -22,7 +23,9 @@ import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.AnalyzeScope
 import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.ClassNameSuffixRule
+import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
+import io.github.archunitlens.rules.NoClassesCodeAccessRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 import io.github.archunitlens.rules.evaluator.ExactCodeAccessEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
@@ -1373,6 +1376,306 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertEquals("printStackTrace", myFixture.file.text.substring(warnings.single().startOffset, warnings.single().endOffset))
     }
 
+    fun testSignatureAwareLoggerRulesMatchOnlyExactOrderedOverloads() {
+        addSignatureCodeAccessStubs()
+        addArchitectureRulesFixture("signatureCodeAccess")
+        myFixture.configureByText(
+            "LoggerCalls.java",
+            """
+                package com.example;
+
+                class LoggerCalls {
+                    void inspect(
+                            org.slf4j.Logger logger,
+                            LoggerImplementation implementation,
+                            java.lang.String message,
+                            java.lang.Throwable failure,
+                            java.lang.Object argument) {
+                        logger.error(message, failure);
+                        logger.warn(message, failure);
+                        logger.info(message, failure);
+                        logger.error(message, argument);
+                        logger.error(message, argument, argument);
+                        logger.error(failure, message);
+                        implementation.error(message, failure);
+                        missing.error(message, failure);
+                    }
+                }
+
+                class LoggerImplementation implements org.slf4j.Logger {
+                    @Override public void error(java.lang.String message, java.lang.Throwable failure) {}
+                    @Override public void warn(java.lang.String message, java.lang.Throwable failure) {}
+                    @Override public void info(java.lang.String message, java.lang.Throwable failure) {}
+                }
+            """.trimIndent(),
+        )
+
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 3, warnings.size)
+        assertEquals(listOf("error", "warn", "info"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+        assertEquals(
+            listOf("error", "warn", "info").map { methodName ->
+                ArchUnitLensBundle.message("inspection.problem.message", "no_logger_failures") + "\n" +
+                    ArchUnitLensBundle.message(
+                        "inspection.problem.methodCall",
+                        "org.slf4j.Logger",
+                        methodName,
+                        "java.lang.String, java.lang.Throwable",
+                    )
+            },
+            warnings.map { it.description },
+        )
+    }
+
+    fun testSignatureAwareMethodRulesUseErasedVarargDeclarationArrays() {
+        addSignatureCodeAccessStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_vararg_logging = noClasses().should()
+                            .callMethod(org.slf4j.Logger.class, "error", java.lang.String.class, java.lang.Object[].class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "VarargLoggerCalls.java",
+            """
+                package com.example;
+                class VarargLoggerCalls {
+                    void run(org.slf4j.Logger logger, java.lang.String text, java.lang.Object argument) {
+                        logger.error(text, argument, argument);
+                        logger.error(text, argument);
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 1, warnings.size)
+        assertEquals("error", myFixture.file.text.substring(warnings.single().startOffset, warnings.single().endOffset))
+        assertTrue(warnings.single().description.orEmpty().contains("java.lang.String, java.lang.Object[]"))
+    }
+
+    fun testSignatureAwareConstructorRulesMatchOnlyExactSymbolicTargets() {
+        addSignatureCodeAccessStubs()
+        addArchitectureRulesFixture("signatureCodeAccess")
+        myFixture.addFileToProject(
+            "src/test/java/com/other/PageImpl.java",
+            "package com.other; public class PageImpl<T> { public PageImpl(java.util.List<T> values) {} }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/CustomPageImpl.java",
+            "package com.example; public class CustomPageImpl<T> extends org.springframework.data.domain.PageImpl<T> { " +
+                "public CustomPageImpl(java.util.List<T> items) { super(items); } }",
+        )
+        myFixture.configureByText(
+            "PageCalls.java",
+            """
+                package com.example;
+
+                class PageCalls {
+                    void inspect(
+                            java.util.List<java.lang.String> items,
+                            org.springframework.data.domain.Pageable pageable) {
+                        new org.springframework.data.domain.PageImpl<java.lang.String>(items);
+                        new org.springframework.data.domain.PageImpl<java.lang.String>(items, pageable, 1L);
+                        new org.springframework.data.domain.PageImpl<java.lang.String>(items, pageable);
+                        new CustomPageImpl<java.lang.String>(items);
+                        PageFactory.create(items);
+                        new org.springframework.data.domain.PageImpl<java.lang.String>(items) {};
+                        new com.other.PageImpl<java.lang.String>(items);
+                        new missing.PageImpl<java.lang.String>(items);
+                    }
+                }
+
+                class PageFactory {
+                    static <T> org.springframework.data.domain.PageImpl<T> create(java.util.List<T> items) {
+                        return null;
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        val liveRule = project.service<ArchRuleProjectService>()
+            .rulesForPackage("com.example")
+            .filterIsInstance<NoClassesCodeAccessRule>()
+            .single { it.ruleName == "no_page_impl_constructors" }
+        assertEquals(2, liveRule.condition.testCodeAccessLeaves().size)
+        val allHighlights = myFixture.doHighlighting()
+        val warnings = allHighlights.filter { it.description?.startsWith(problemMessage("")) == true }
+        assertEquals(allHighlights.map { "${it.startOffset}-${it.endOffset}:${it.description}" }.toString(), 2, warnings.size)
+        assertEquals(listOf("PageImpl", "PageImpl"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+        assertEquals(
+            listOf(
+                "java.util.List",
+                "java.util.List, org.springframework.data.domain.Pageable, long",
+            ).map { parameters ->
+                ArchUnitLensBundle.message("inspection.problem.message", "no_page_impl_constructors") + "\n" +
+                    ArchUnitLensBundle.message(
+                        "inspection.problem.constructorCall",
+                        "org.springframework.data.domain.PageImpl",
+                        parameters,
+                    )
+            },
+            warnings.map { it.description },
+        )
+    }
+
+    fun testSignatureAwareCodeAccessPreservesLeftAssociativeSameClassBooleanSemantics() {
+        addSignatureCodeAccessStubs()
+        addArchitectureRules(
+            """
+                package com.example;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule mixed_accesses = noClasses().should()
+                            .callMethod(org.slf4j.Logger.class, "error", java.lang.String.class, java.lang.Throwable.class)
+                            .andShould().callConstructor(org.springframework.data.domain.PageImpl.class, java.util.List.class)
+                            .orShould().callMethod(org.slf4j.Logger.class, "info", java.lang.String.class, java.lang.Throwable.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "BooleanCalls.java",
+            """
+                package com.example;
+
+                class ErrorOnly {
+                    void run(org.slf4j.Logger logger, java.lang.String text, java.lang.Throwable failure) {
+                        logger.error(text, failure);
+                    }
+                }
+
+                class Both {
+                    void run(org.slf4j.Logger logger, java.lang.String text, java.lang.Throwable failure,
+                            java.util.List<java.lang.String> items) {
+                        new org.springframework.data.domain.PageImpl<java.lang.String>(items);
+                        logger.error(text, failure);
+                    }
+                }
+
+                class InfoOnly {
+                    void run(org.slf4j.Logger logger, java.lang.String text, java.lang.Throwable failure) {
+                        logger.info(text, failure);
+                    }
+                }
+
+                class SplitOuter {
+                    void run(org.slf4j.Logger logger, java.lang.String text, java.lang.Throwable failure) {
+                        logger.error(text, failure);
+                    }
+                    class Inner {
+                        void run(java.util.List<java.lang.String> items) {
+                            new org.springframework.data.domain.PageImpl<java.lang.String>(items);
+                        }
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 3, warnings.size)
+        assertEquals(listOf("PageImpl", "error", "info"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
+    fun testSignatureAwareCodeAccessUsesSymbolicOwnersForUnqualifiedInheritedStaticImportAndEnclosingCalls() {
+        addSignatureCodeAccessStubs()
+        addArchitectureRules(
+            """
+                package com.example;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule exact_owners = noClasses().should()
+                            .callMethod(java.lang.Throwable.class, "printStackTrace")
+                            .orShould().callMethod(java.lang.Throwable.class, "staticTrace")
+                            .orShould().callMethod(java.lang.System.class, "lineSeparator");
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "OwnerCalls.java",
+            """
+                package com.example;
+                import static java.lang.System.lineSeparator;
+                class OwnerCalls extends java.lang.Throwable {
+                    void run(java.lang.Throwable parent, java.lang.Exception other) {
+                        printStackTrace();
+                        this.printStackTrace();
+                        super.printStackTrace();
+                        parent.printStackTrace();
+                        other.printStackTrace();
+                        staticTrace();
+                        OwnerCalls.staticTrace();
+                        java.lang.Throwable.staticTrace();
+                        lineSeparator();
+                        java.lang.System.lineSeparator();
+                    }
+                    class Inner {
+                        void run() { printStackTrace(); staticTrace(); }
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        val liveRule = project.service<ArchRuleProjectService>()
+            .rulesForPackage("com.example")
+            .filterIsInstance<NoClassesCodeAccessRule>()
+            .single { it.ruleName == "exact_owners" }
+        assertEquals(3, liveRule.condition.testCodeAccessLeaves().size)
+        val allHighlights = myFixture.doHighlighting()
+        val warnings = allHighlights.filter { it.description?.startsWith(problemMessage("")) == true }
+        assertEquals(allHighlights.map { "${it.startOffset}-${it.endOffset}:${it.description}" }.toString(), 5, warnings.size)
+        assertEquals(
+            listOf("printStackTrace", "printStackTrace", "staticTrace", "lineSeparator", "lineSeparator"),
+            warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+    }
+
+    fun testSignatureAwareConstructorRulesIncludeExplicitThisAndSuperCalls() {
+        addSignatureCodeAccessStubs()
+        val constructorTargets = myFixture.addFileToProject(
+            "src/test/java/org/example/ChildRecord.java",
+            """
+                package org.example;
+                public class ChildRecord extends java.lang.Exception {
+                    public ChildRecord() { this(""); }
+                    public ChildRecord(java.lang.String value) { super(value); }
+                }
+            """.trimIndent(),
+        )
+        addArchitectureRules(
+            """
+                package com.example;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule exact_constructor_delegation = noClasses().should()
+                            .callConstructor(org.example.ChildRecord.class, java.lang.String.class)
+                            .orShould().callConstructor(java.lang.Exception.class, java.lang.String.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureFromExistingVirtualFile(constructorTargets.virtualFile)
+        val liveRule = project.service<ArchRuleProjectService>()
+            .rulesForPackage("org.example")
+            .filterIsInstance<NoClassesCodeAccessRule>()
+            .single { it.ruleName == "exact_constructor_delegation" }
+        assertEquals(2, liveRule.condition.testCodeAccessLeaves().size)
+        val allHighlights = myFixture.doHighlighting()
+        val warnings = allHighlights.filter { it.description?.startsWith(problemMessage("")) == true }
+        assertEquals(allHighlights.map { "${it.startOffset}-${it.endOffset}:${it.description}" }.toString(), 2, warnings.size)
+        assertEquals(listOf("this", "super"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
     fun testExactCodeAccessIncludesAccessesInsideTargetClassLambdas() {
         addCodeAccessJdkStubs()
         addArchitectureRulesFixture("exactCodeAccess")
@@ -1395,17 +1698,20 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
     }
 
     fun testExactCodeAccessFailsClosedForUnresolvedAndDumbMode() {
-        addCodeAccessJdkStubs()
-        addArchitectureRulesFixture("exactCodeAccess")
+        addSignatureCodeAccessStubs()
+        addArchitectureRulesFixture("signatureCodeAccessPerformance")
         myFixture.configureByText(
             "UnresolvedAccess.java",
-            "package com.example; class UnresolvedAccess { void run() { Missing.out.println(); missing.printStackTrace(); } }",
+            "package com.example; class UnresolvedAccess { void run() { " +
+                "Missing.out.println(); missing.printStackTrace(); new missing.PageImpl(); } }",
         )
         assertTrue(warningHighlights().isEmpty())
 
         myFixture.configureByText(
             "DumbAccess.java",
-            "package com.example; class DumbAccess { void run(java.lang.Throwable failure) { java.lang.System.out.println(); failure.printStackTrace(); } }",
+            "package com.example; class DumbAccess { void run(java.lang.Throwable failure, java.util.List items) { " +
+                "java.lang.System.out.println(); failure.printStackTrace(); " +
+                "new org.springframework.data.domain.PageImpl(items); } }",
         )
         DumbModeTestUtils.runInDumbModeSynchronously(project) {
             val file = myFixture.file as PsiJavaFile
@@ -1413,23 +1719,52 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
             val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
             PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java).forEach(visitor::visitReferenceExpression)
             PsiTreeUtil.findChildrenOfType(file, PsiMethodCallExpression::class.java).forEach(visitor::visitMethodCallExpression)
+            PsiTreeUtil.findChildrenOfType(file, PsiNewExpression::class.java).forEach(visitor::visitNewExpression)
             assertTrue(holder.results.isEmpty())
         }
     }
 
+    fun testSignatureCodeAccessFailsClosedWhenAnyRuleSiblingUsesCustomWhere() {
+        addSignatureCodeAccessStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule custom_sibling = noClasses().should()
+                            .callMethod(org.slf4j.Logger.class, "error", java.lang.String.class, java.lang.Throwable.class)
+                            .orShould().callMethodWhere(customPredicate());
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "CustomWhereCall.java",
+            "package com.example; class CustomWhereCall { void run(org.slf4j.Logger logger, " +
+                "java.lang.String text, java.lang.Throwable failure) { logger.error(text, failure); } }",
+        )
+
+        assertTrue(
+            project.service<ArchRuleProjectService>().rulesForPackage("com.example").none { it.ruleName == "custom_sibling" },
+        )
+        assertTrue(warningHighlights().isEmpty())
+    }
+
     fun testCodeAccessNamePrefilterResolvesEachCandidateAtMostOnce() {
-        addCodeAccessJdkStubs()
-        addArchitectureRulesFixture("exactCodeAccess")
+        addSignatureCodeAccessStubs()
+        addArchitectureRulesFixture("signatureCodeAccessPerformance")
         val file = myFixture.configureByText(
             "ResolveCounts.java",
             """
                 package com.example;
                 class ResolveCounts {
-                    void run(java.lang.Throwable failure) {
+                    void run(java.lang.Throwable failure, java.util.List<java.lang.String> items) {
                         java.lang.System.out.println("candidate");
                         failure.printStackTrace();
                         failure.getMessage();
                         java.lang.System.lineSeparator();
+                        new org.springframework.data.domain.PageImpl<java.lang.String>(items);
+                        new java.lang.Object();
                     }
                 }
             """.trimIndent(),
@@ -1440,6 +1775,7 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(activeRules.toString(), activeRules.any { it is io.github.archunitlens.rules.NoClassesCodeAccessRule })
         var fieldResolves = 0
         var methodResolves = 0
+        var constructorResolves = 0
 
         PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java).forEach { reference ->
             val counting = object : PsiReferenceExpression by reference {
@@ -1459,26 +1795,39 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
             }
             visitor.visitMethodCallExpression(counting)
         }
+        PsiTreeUtil.findChildrenOfType(file, PsiNewExpression::class.java).forEach { expression ->
+            val counting = object : PsiNewExpression by expression {
+                override fun resolveConstructor(): PsiMethod? {
+                    constructorResolves++
+                    return expression.resolveConstructor()
+                }
+            }
+            visitor.visitNewExpression(counting)
+        }
 
         val referenceNames = PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java).map { it.referenceName }
         val methodNames = PsiTreeUtil.findChildrenOfType(file, PsiMethodCallExpression::class.java).map { it.methodExpression.referenceName }
         assertEquals(referenceNames.toString(), 1, fieldResolves)
         assertEquals(methodNames.toString(), 1, methodResolves)
+        assertEquals(1, constructorResolves)
     }
 
     fun testCodeAccessPrefilterRepresentativeJavaBodyTiming() {
-        addCodeAccessJdkStubs()
-        addArchitectureRulesFixture("exactCodeAccess")
+        addSignatureCodeAccessStubs()
+        addArchitectureRulesFixture("signatureCodeAccessPerformance")
         val unrelatedCalls = (1..1_000).joinToString("\n") { "helper();" }
+        val unrelatedConstructions = (1..1_000).joinToString("\n") { "new java.lang.Object();" }
         val file = myFixture.configureByText(
             "RepresentativeBody.java",
             """
                 package com.example;
                 class RepresentativeBody {
-                    void run(java.lang.Throwable failure) {
+                    void run(java.lang.Throwable failure, java.util.List<java.lang.String> items) {
                         java.lang.System.out.println();
                         failure.printStackTrace();
+                        new org.springframework.data.domain.PageImpl<java.lang.String>(items);
                         $unrelatedCalls
+                        $unrelatedConstructions
                     }
                     void helper() {}
                 }
@@ -1488,8 +1837,10 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
         val references = PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java)
         val calls = PsiTreeUtil.findChildrenOfType(file, PsiMethodCallExpression::class.java)
+        val constructions = PsiTreeUtil.findChildrenOfType(file, PsiNewExpression::class.java)
         var fieldResolves = 0
         var methodResolves = 0
+        var constructorResolves = 0
         val countingReferences = references.map { reference ->
             object : PsiReferenceExpression by reference {
                 override fun resolve(): PsiElement? {
@@ -1506,9 +1857,18 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
                 }
             }
         }
+        val countingConstructions = constructions.map { expression ->
+            object : PsiNewExpression by expression {
+                override fun resolveConstructor(): PsiMethod? {
+                    constructorResolves++
+                    return expression.resolveConstructor()
+                }
+            }
+        }
         val pass = {
             countingReferences.forEach(visitor::visitReferenceExpression)
             countingCalls.forEach(visitor::visitMethodCallExpression)
+            countingConstructions.forEach(visitor::visitNewExpression)
         }
 
         repeat(3) { pass() }
@@ -1517,9 +1877,10 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
 
         assertEquals(13, fieldResolves)
         assertEquals(13, methodResolves)
+        assertEquals(13, constructorResolves)
         println(
-            "CODE_ACCESS_TIMING references=${references.size} calls=${calls.size} " +
-                "candidateResolves=2 medianNanos=$medianNanos",
+            "CODE_ACCESS_TIMING references=${references.size} calls=${calls.size} constructions=${constructions.size} " +
+                "candidateResolves=3 medianNanos=$medianNanos",
         )
     }
 
@@ -1596,17 +1957,65 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         )
         myFixture.addFileToProject(
             "src/test/java/java/lang/Throwable.java",
-            "package java.lang; public class Throwable { public void printStackTrace() {} }",
+            "package java.lang; public class Throwable { " +
+                "public void printStackTrace() {} public static void staticTrace() {} }",
         )
         myFixture.addFileToProject(
             "src/test/java/java/lang/Exception.java",
-            "package java.lang; public class Exception extends java.lang.Throwable {}",
+            "package java.lang; public class Exception extends java.lang.Throwable { " +
+                "public Exception() {} public Exception(java.lang.String message) {} }",
         )
         myFixture.addFileToProject(
             "src/test/java/java/lang/System.java",
             "package java.lang; public final class System { " +
                 "public static java.io.PrintStream out; public static java.io.PrintStream err; " +
                 "public static String lineSeparator() { return \"\"; } }",
+        )
+    }
+
+    private fun addSignatureCodeAccessStubs() {
+        addCodeAccessJdkStubs()
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/Object.java",
+            "package java.lang; public class Object {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/slf4j/Logger.java",
+            """
+                package org.slf4j;
+                public interface Logger {
+                    void error(java.lang.String message, java.lang.Throwable failure);
+                    void error(java.lang.String message, java.lang.Object argument);
+                    void error(java.lang.String message, java.lang.Object... arguments);
+                    void error(java.lang.Throwable failure, java.lang.String message);
+                    void warn(java.lang.String message, java.lang.Throwable failure);
+                    void warn(java.lang.String message, java.lang.Object argument);
+                    void info(java.lang.String message, java.lang.Throwable failure);
+                    void info(java.lang.String message, java.lang.Object argument);
+                }
+            """.trimIndent(),
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/util/List.java",
+            "package java.util; public interface List<E> {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/springframework/data/domain/Pageable.java",
+            "package org.springframework.data.domain; public interface Pageable {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/springframework/data/domain/PageImpl.java",
+            """
+                package org.springframework.data.domain;
+                public class PageImpl<T> {
+                    public PageImpl(java.util.List<T> items) {}
+                    public PageImpl(java.util.List<T> items, org.springframework.data.domain.Pageable pageable) {}
+                    public PageImpl(
+                            java.util.List<T> items,
+                            org.springframework.data.domain.Pageable pageable,
+                            long total) {}
+                }
+            """.trimIndent(),
         )
     }
 
@@ -1622,6 +2031,12 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         .of("src/test/testData", path)
         .toFile()
         .readText()
+
+    private fun ConditionExpr.testCodeAccessLeaves(): List<ConditionExpr> = when (this) {
+        is ConditionExpr.And -> left.testCodeAccessLeaves() + right.testCodeAccessLeaves()
+        is ConditionExpr.Or -> left.testCodeAccessLeaves() + right.testCodeAccessLeaves()
+        else -> listOf(this)
+    }
 
     private fun addSpringServiceAnnotationStub() {
         myFixture.addFileToProject(

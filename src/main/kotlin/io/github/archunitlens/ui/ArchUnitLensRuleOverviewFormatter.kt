@@ -277,6 +277,7 @@ internal object ArchUnitLensRuleOverviewFormatter {
         is ConditionExpr.BeAssignableTo -> "beAssignableTo($qualifiedName)"
         is ConditionExpr.AccessField -> "accessField($ownerQualifiedName.$fieldName)"
         is ConditionExpr.CallMethod -> "callMethod($ownerQualifiedName.$methodName(${parameterTypeQualifiedNames.joinToString()}))"
+        is ConditionExpr.CallConstructor -> "callConstructor($ownerQualifiedName(${parameterTypeQualifiedNames.joinToString()}))"
         is ConditionExpr.And -> "(${left.display()} AND ${right.display()})"
         is ConditionExpr.Or -> "(${left.display()} OR ${right.display()})"
     }

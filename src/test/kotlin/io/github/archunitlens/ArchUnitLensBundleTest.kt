@@ -20,5 +20,13 @@ class ArchUnitLensBundleTest {
         assertEquals("ArchUnit Lens", korean.getString("settings.display.name"))
         assertEquals("Open source", english.getString("toolwindow.openSource"))
         assertEquals("소스 열기", korean.getString("toolwindow.openSource"))
+        assertEquals(
+            "Forbidden constructor call: {0}({1})",
+            english.getString("inspection.problem.constructorCall"),
+        )
+        assertEquals(
+            "금지된 생성자 호출: {0}({1})",
+            korean.getString("inspection.problem.constructorCall"),
+        )
     }
 }

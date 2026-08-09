@@ -54,14 +54,14 @@ The initial live-warning subset includes:
 - left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
 - literal class and method meta-annotation rules, including direct and transitively composed annotations
-- exact `noClasses()` field accesses and zero-argument method calls, including bounded `orShould()` when every sibling is supported
+- exact `noClasses()` field, signature-aware method, and constructor accesses. Method and constructor signatures use ordered literal parameter class FQNs, including primitive, array, and erased vararg types; bounded left-associative `andShould()` / `orShould()` is live only when every sibling is supported
 - `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
 
 ## Rule Overview
 
 Open **ArchUnit Lens** from the right tool window bar to review discovered rules. The overview shows supported and unsupported rule fields with filters, rule-name search, source navigation, current-file-only scope, subject/unsupported-reason grouping, reason text, scan metrics, package cache metrics, and indexing/stale fallback diagnostics.
 
-![Exact code-access rules in Rule Overview](docs/images/issue-49-exact-code-access-overview.png)
+![Signature-aware code-access rules in Rule Overview](docs/images/issue-50-signature-code-access-overview.png)
 
 ## Quick fixes
 
@@ -83,7 +83,7 @@ ArchUnit Lens does not execute ArchUnit rules or user/project code. It intention
 - unresolved dependency references; resolve failures intentionally produce no warning
 - arbitrary method/member subject rules beyond the literal meta-annotation subset
 - method/constructor declaration conventions tracked by issue #24
-- parameterized method/constructor access, access `Where` predicates, method references, call graphs, and bytecode analysis
+- access `Where` predicates, method references, call graphs, bytecode analysis, and method/constructor access arguments that are not complete literal class schemas
 - any condition tree containing a custom, dynamic, helper-backed (including lambda), unresolved, or otherwise unsupported sibling
 
 ## Settings

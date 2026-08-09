@@ -1,6 +1,7 @@
 package io.github.archunitlens.rules
 
 import com.intellij.psi.PsiArrayAccessExpression
+import com.intellij.psi.PsiArrayType
 import com.intellij.psi.PsiClassObjectAccessExpression
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiExpression
@@ -9,7 +10,10 @@ import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.PsiNewExpression
 import com.intellij.psi.PsiParenthesizedExpression
+import com.intellij.psi.PsiPrimitiveType
 import com.intellij.psi.PsiReferenceExpression
+import com.intellij.psi.PsiType
+import com.intellij.psi.util.TypeConversionUtil
 
 /**
  * A single static ArchUnit DSL method call extracted from a PSI initializer.
@@ -88,7 +92,7 @@ object RawCallExtractor {
         is PsiClassObjectAccessExpression -> RawArgument.ClassLiteral(
             position,
             operand.type.canonicalText,
-            (operand.type as? PsiClassType)?.resolve()?.qualifiedName,
+            operand.type.resolvedClassLiteralName(),
         )
         is PsiMethodCallExpression -> RawArgument.NestedCall(position, methodExpression.referenceName)
         is PsiLambdaExpression -> RawArgument.Lambda(position)
@@ -101,5 +105,11 @@ object RawCallExtractor {
     private fun PsiExpression.unwrapped(): PsiExpression = when (this) {
         is PsiParenthesizedExpression -> expression?.unwrapped() ?: this
         else -> this
+    }
+
+    private fun PsiType.resolvedClassLiteralName(): String? = when (this) {
+        is PsiPrimitiveType -> canonicalText
+        is PsiArrayType -> componentType.resolvedClassLiteralName()?.plus("[]")
+        else -> (TypeConversionUtil.erasure(this) as? PsiClassType)?.resolve()?.qualifiedName
     }
 }

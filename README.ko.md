@@ -54,14 +54,14 @@ ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live wa
 - 모든 leaf가 정적으로 지원될 때 left-associative class predicate `and()` / `or()`와 독립적인 `andShould()` condition
 - `beAssignableTo(...)` 대상이 resolve되는 QueryMapper 형태 interface rule
 - direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule
-- 모든 sibling이 지원되는 bounded `orShould()`를 포함한 exact `noClasses()` field access 및 zero-argument method call
+- exact `noClasses()` field, signature-aware method, constructor access. method/constructor signature는 primitive, array, erasure된 vararg type을 포함한 순서 있는 literal parameter class FQN으로 비교하며, 모든 sibling이 지원될 때만 left-associative `andShould()` / `orShould()`를 live 평가합니다.
 - `@AnalyzeClasses(packages = ...)` scope와 `.because("...")` reason 표시
 
 ## Rule Overview
 
 오른쪽 tool window bar에서 **ArchUnit Lens**를 열면 발견된 rule을 확인할 수 있습니다. overview에는 지원/미지원 rule field filter, rule 이름 검색, source navigation, 현재 파일 기준 보기, subject/unsupported reason grouping, reason, scan metrics, package cache metrics, indexing/stale fallback 진단이 표시됩니다.
 
-![Rule Overview의 exact code-access rule](docs/images/issue-49-exact-code-access-overview.png)
+![Rule Overview의 signature-aware code-access rule](docs/images/issue-50-signature-code-access-overview.png)
 
 ## Quick Fix
 
@@ -83,7 +83,7 @@ ArchUnit Lens는 ArchUnit rule이나 사용자/프로젝트 코드를 실행하�
 - resolve되지 않는 dependency reference. resolve 실패는 의도적으로 warning을 만들지 않습니다.
 - literal meta-annotation subset 밖의 임의 method/member subject rule
 - issue #24로 추적하는 method/constructor declaration convention
-- parameter가 있는 method/constructor access, access `Where` predicate, method reference, call graph, bytecode 분석
+- access `Where` predicate, method reference, call graph, bytecode 분석, 완전한 literal class schema가 아닌 method/constructor access argument
 - custom, dynamic, lambda를 포함한 helper-backed, unresolved 또는 그 밖의 미지원 sibling이 하나라도 포함된 condition tree
 
 ## 설정

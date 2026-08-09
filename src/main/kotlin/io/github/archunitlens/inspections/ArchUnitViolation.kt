@@ -59,6 +59,11 @@ internal sealed interface ArchUnitViolation {
         override val rule: LiveArchRule,
         val condition: ConditionExpr.CallMethod,
     ) : ArchUnitViolation
+
+    data class ForbiddenConstructorCall(
+        override val rule: LiveArchRule,
+        val condition: ConditionExpr.CallConstructor,
+    ) : ArchUnitViolation
 }
 
 /**
@@ -79,6 +84,7 @@ internal fun ArchUnitViolation.quickFixes(): Array<LocalQuickFix> = when (this) 
     is ArchUnitViolation.ClassConvention -> navigationFixes()
     is ArchUnitViolation.ForbiddenFieldAccess -> navigationFixes()
     is ArchUnitViolation.ForbiddenMethodCall -> navigationFixes()
+    is ArchUnitViolation.ForbiddenConstructorCall -> navigationFixes()
 }
 
 @InspectionMessage
@@ -109,6 +115,11 @@ private fun ArchUnitViolation.detailMessage(): String? = when (this) {
         "inspection.problem.methodCall",
         condition.ownerQualifiedName,
         condition.methodName,
+        condition.parameterTypeQualifiedNames.joinToString(),
+    )
+    is ArchUnitViolation.ForbiddenConstructorCall -> ArchUnitLensBundle.message(
+        "inspection.problem.constructorCall",
+        condition.ownerQualifiedName,
         condition.parameterTypeQualifiedNames.joinToString(),
     )
     else -> null

@@ -16,6 +16,26 @@ private val ARCHUNIT_SUBJECT_ENTRY_POINTS = setOf(
     "methods",
 )
 
+private val CODE_ACCESS_CONDITION_NAMES = setOf(
+    "accessField",
+    "callMethod",
+    "callConstructor",
+    "callMethodWhere",
+    "callConstructorWhere",
+)
+
+private val PRIMITIVE_TYPE_NAMES = setOf(
+    "boolean",
+    "byte",
+    "char",
+    "double",
+    "float",
+    "int",
+    "long",
+    "short",
+    "void",
+)
+
 internal enum class ExactHandlerFamily {
     PACKAGE_DEPENDENCY_BAN,
     CLASS_NAME_SUFFIX,
@@ -399,18 +419,24 @@ object ArchRuleParser {
         val conditionCalls = calls.drop(shouldIndex + 1).withoutTrailingBecauseCall()
         if (conditionCalls.isEmpty()) return null
         var condition: ConditionExpr? = null
-        var expectsLeaf = true
+        var pendingOperator: String? = null
         conditionCalls.forEach { call ->
-            if (expectsLeaf) {
-                val leaf = call.exactCodeAccessLeaf() ?: return null
-                condition = condition?.let { ConditionExpr.Or(it, leaf) } ?: leaf
-                expectsLeaf = false
+            if (call.name == "andShould" || call.name == "orShould") {
+                if (condition == null || pendingOperator != null) return null
+                pendingOperator = call.name
             } else {
-                if (call.name != "orShould") return null
-                expectsLeaf = true
+                if (condition != null && pendingOperator == null) return null
+                val leaf = call.exactCodeAccessLeaf() ?: return null
+                condition = when (pendingOperator) {
+                    null -> leaf
+                    "andShould" -> ConditionExpr.And(condition ?: return null, leaf)
+                    "orShould" -> ConditionExpr.Or(condition ?: return null, leaf)
+                    else -> return null
+                }
+                pendingOperator = null
             }
         }
-        if (expectsLeaf) return null
+        if (pendingOperator != null) return null
 
         return NoClassesCodeAccessRule(
             ruleName = source.ruleName,
@@ -422,13 +448,31 @@ object ArchRuleParser {
     }
 
     private fun RawCall.exactCodeAccessLeaf(): ConditionExpr? {
-        val owner = (arguments.getOrNull(0) as? RawArgument.ClassLiteral)?.resolvedQualifiedName ?: return null
-        val memberName = (arguments.getOrNull(1) as? RawArgument.StringLiteral)?.value ?: return null
+        val owner = (arguments.firstOrNull() as? RawArgument.ClassLiteral)?.resolvedOwnerQualifiedName() ?: return null
         return when (name) {
-            "accessField" -> ConditionExpr.AccessField(owner, memberName)
-            "callMethod" -> ConditionExpr.CallMethod(owner, memberName, emptyList())
+            "accessField" -> ConditionExpr.AccessField(
+                owner,
+                (arguments.getOrNull(1) as? RawArgument.StringLiteral)?.value ?: return null,
+            )
+            "callMethod" -> ConditionExpr.CallMethod(
+                owner,
+                (arguments.getOrNull(1) as? RawArgument.StringLiteral)?.value ?: return null,
+                arguments.drop(2).resolvedParameterTypeQualifiedNames() ?: return null,
+            )
+            "callConstructor" -> ConditionExpr.CallConstructor(
+                owner,
+                arguments.drop(1).resolvedParameterTypeQualifiedNames() ?: return null,
+            )
             else -> null
         }
+    }
+
+    private fun List<RawArgument>.resolvedParameterTypeQualifiedNames(): List<String>? = map { argument ->
+        (argument as? RawArgument.ClassLiteral)?.resolvedQualifiedName ?: return null
+    }
+
+    private fun RawArgument.ClassLiteral.resolvedOwnerQualifiedName(): String? = resolvedQualifiedName?.takeUnless { name ->
+        name.endsWith("[]") || name in PRIMITIVE_TYPE_NAMES
     }
 
     private fun ExactHandlerFamily.owns(calls: List<RawCall>): Boolean {
@@ -463,7 +507,7 @@ object ArchRuleParser {
                     conditionNames == listOf("notBeMetaAnnotatedWith")
             ExactHandlerFamily.CODE_ACCESS ->
                 predicateNames.firstOrNull() in setOf("classes", "noClasses") &&
-                    conditionNames.any { it == "accessField" || it == "callMethod" }
+                    conditionNames.any { it in CODE_ACCESS_CONDITION_NAMES }
         }
     }
 
@@ -481,7 +525,9 @@ object ArchRuleParser {
                 "notBeMetaAnnotatedWith", "beAssignableTo",
                 ->
                     ArgumentExpectation.Annotation
-                "accessField", "callMethod" -> ArgumentExpectation.ExactOwnerAndName
+                "accessField" -> ArgumentExpectation.ExactOwnerAndName
+                "callMethod" -> ArgumentExpectation.ExactMethodTarget
+                "callConstructor" -> ArgumentExpectation.ExactConstructorTarget
                 else -> continue
             }
             expectation.validate(call)?.let { return it }
@@ -538,18 +584,67 @@ object ArchRuleParser {
                 if (call.arguments.size != 2) {
                     return UnsupportedReason.InvalidArity(call.name, "2", call.arguments.size)
                 }
-                val owner = call.arguments[0]
-                if (owner !is RawArgument.ClassLiteral) {
-                    return UnsupportedReason.UnsupportedArgument(call.name, owner.position, owner.kindName())
-                }
-                if (owner.resolvedQualifiedName == null) {
-                    return UnsupportedReason.UnresolvedSymbol(call.name, owner.canonicalName)
-                }
+                validateOwner(call)?.let { return it }
                 val name = call.arguments[1]
                 if (name !is RawArgument.StringLiteral) {
                     return UnsupportedReason.UnsupportedArgument(call.name, name.position, name.kindName())
                 }
                 return null
+            }
+        }
+
+        data object ExactMethodTarget : ArgumentExpectation {
+            override fun validate(call: RawCall): UnsupportedReason? {
+                if (call.arguments.size < 2) {
+                    return UnsupportedReason.InvalidArity(call.name, "at least 2", call.arguments.size)
+                }
+                validateOwner(call)?.let { return it }
+                val name = call.arguments[1]
+                if (name !is RawArgument.StringLiteral) {
+                    return UnsupportedReason.UnsupportedArgument(call.name, name.position, name.kindName())
+                }
+                return validateParameterTypes(call, call.arguments.drop(2))
+            }
+        }
+
+        data object ExactConstructorTarget : ArgumentExpectation {
+            override fun validate(call: RawCall): UnsupportedReason? {
+                if (call.arguments.isEmpty()) {
+                    return UnsupportedReason.InvalidArity(call.name, "at least 1", 0)
+                }
+                validateOwner(call)?.let { return it }
+                return validateParameterTypes(call, call.arguments.drop(1))
+            }
+        }
+
+        companion object {
+            private fun validateOwner(call: RawCall): UnsupportedReason? {
+                val owner = call.arguments[0]
+                if (owner !is RawArgument.ClassLiteral) {
+                    return UnsupportedReason.UnsupportedArgument(call.name, owner.position, owner.kindName())
+                }
+                val resolvedOwner = owner.resolvedQualifiedName
+                if (resolvedOwner == null) {
+                    return UnsupportedReason.UnresolvedSymbol(call.name, owner.canonicalName)
+                }
+                if (resolvedOwner.endsWith("[]") || resolvedOwner in PRIMITIVE_TYPE_NAMES) {
+                    return UnsupportedReason.UnsupportedArgument(call.name, owner.position, "non-class owner")
+                }
+                return null
+            }
+
+            private fun validateParameterTypes(
+                call: RawCall,
+                parameters: List<RawArgument>,
+            ): UnsupportedReason? {
+                val unsupported = parameters.firstOrNull { it !is RawArgument.ClassLiteral }
+                if (unsupported != null) {
+                    return UnsupportedReason.UnsupportedArgument(call.name, unsupported.position, unsupported.kindName())
+                }
+                return parameters
+                    .filterIsInstance<RawArgument.ClassLiteral>()
+                    .firstOrNull { it.resolvedQualifiedName == null }
+                    ?.let { UnsupportedReason.UnresolvedSymbol(call.name, it.canonicalName) }
             }
         }
     }
