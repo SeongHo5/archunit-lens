@@ -8,6 +8,7 @@ import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiElementVisitor
+import com.intellij.psi.PsiField
 import com.intellij.psi.PsiImportStatement
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
@@ -278,6 +279,23 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                         }
                 }
             }
+
+            override fun visitField(field: PsiField) {
+                if (DumbService.isDumb(holder.project)) return
+                memberConventionRules
+                    .filter { it.subject == MemberSubjectKind.Fields }
+                    .filter { MemberSubjectEvaluator.matches(it, field, packageName) }
+                    .forEach { rule ->
+                        MemberSubjectEvaluator.violations(rule, field).forEach { detail ->
+                            val violation = ArchUnitViolation.MemberConvention(rule, detail)
+                            holder.registerProblem(
+                                field.nameIdentifier ?: field,
+                                violation.problemMessage(),
+                                *violation.quickFixes(),
+                            )
+                        }
+                    }
+            }
         }
     }
 }
@@ -318,6 +336,7 @@ private fun PredicateExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     is PredicateExpr.Leaf -> false
     is PredicateExpr.AreAnnotatedWith,
     is PredicateExpr.AreNotAnnotatedWith,
+    is PredicateExpr.AreMetaAnnotatedWith,
     -> settings.annotationRulesEnabled
     is PredicateExpr.ResideInPackages,
     is PredicateExpr.HaveSimpleNameEndingWith,
@@ -325,6 +344,8 @@ private fun PredicateExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     -> settings.classNamingRulesEnabled
     is PredicateExpr.AreInterfaces,
     is PredicateExpr.AreEnums,
+    is PredicateExpr.AreAssignableTo,
+    is PredicateExpr.Implement,
     -> settings.interfaceRulesEnabled
     is PredicateExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
     is PredicateExpr.Or -> left.isEnabledBy(settings) && right.isEnabledBy(settings)

@@ -25,6 +25,9 @@ sealed interface PredicateExpr {
     data class Leaf(val predicate: String) : PredicateExpr
     data class AreAnnotatedWith(val qualifiedName: String) : PredicateExpr
     data class AreNotAnnotatedWith(val qualifiedName: String) : PredicateExpr
+    data class AreMetaAnnotatedWith(val qualifiedName: String, val expected: Boolean) : PredicateExpr
+    data class AreAssignableTo(val qualifiedName: String, val expected: Boolean) : PredicateExpr
+    data class Implement(val qualifiedName: String, val expected: Boolean) : PredicateExpr
     data class ResideInPackages(val patterns: List<String>) : PredicateExpr
     data class HaveSimpleNameEndingWith(val suffix: String) : PredicateExpr
     data class HaveSimpleNameNotEndingWith(val suffix: String) : PredicateExpr
@@ -70,15 +73,31 @@ sealed interface MemberConditionExpr {
     data object BePrivate : MemberConditionExpr
     data object BeStatic : MemberConditionExpr
     data class HaveRawReturnType(val qualifiedName: String) : MemberConditionExpr
+    data class BeAnnotatedWith(
+        val qualifiedName: String,
+        val metaAnnotated: Boolean,
+        val required: Boolean,
+    ) : MemberConditionExpr
+
+    data class HaveModifier(val modifier: String, val required: Boolean) : MemberConditionExpr
+    data class HaveName(val name: String, val required: Boolean) : MemberConditionExpr
+    data class HaveNameMatching(val pattern: String, val required: Boolean) : MemberConditionExpr
     data class And(val left: MemberConditionExpr, val right: MemberConditionExpr) : MemberConditionExpr
+    data class Or(val left: MemberConditionExpr, val right: MemberConditionExpr) : MemberConditionExpr
 }
 
 /**
  * Positive declaration subjects that can be evaluated without visiting method bodies.
  */
 sealed interface MemberSubjectKind {
+    data object Fields : MemberSubjectKind
     data object Methods : MemberSubjectKind
     data object Constructors : MemberSubjectKind
+}
+
+enum class RulePolarity {
+    POSITIVE,
+    NEGATIVE,
 }
 
 /**
@@ -128,6 +147,7 @@ data class RuleDescriptor(
     val condition: ConditionExpr,
     val reason: String?,
     val supportStatus: SupportStatus,
+    val polarity: RulePolarity = RulePolarity.POSITIVE,
 )
 
 /**

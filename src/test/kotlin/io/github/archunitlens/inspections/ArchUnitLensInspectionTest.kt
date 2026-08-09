@@ -20,7 +20,11 @@ import io.github.archunitlens.rules.AnalyzeScope
 import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.ClassNameSuffixRule
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
+import io.github.archunitlens.rules.MemberConventionRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
+import io.github.archunitlens.rules.SupportStatus
+import io.github.archunitlens.rules.UnsupportedReason
+import io.github.archunitlens.rules.evaluator.MemberSubjectEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.nio.file.Path
 
@@ -1460,6 +1464,217 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testNegativeFieldAndMethodRulesReportOnlySelectedForbiddenDeclarations() {
+        addNegativeMemberStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_value_fields = noFields().should()
+                            .beAnnotatedWith(com.example.Value.class);
+                    @ArchTest static final ArchRule no_setters = noMethods().that()
+                            .areDeclaredInClassesThat().implement(com.example.QueryModel.class)
+                            .should().haveNameMatching("^set[A-Z].*");
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Query.java",
+            """
+                package com.example;
+                class Query implements com.example.QueryModel {
+                    @com.example.Value String secret;
+                    @com.other.Value String sameName;
+                    String plain;
+                    public void setName() {}
+                    public void getName() {}
+                }
+                class NotSelected { public void setIgnored() {} }
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            2,
+            project.service<ArchRuleProjectService>().rulesForPackage("com.example").filterIsInstance<io.github.archunitlens.rules.MemberConventionRule>().size,
+        )
+        val candidate = (myFixture.file as PsiJavaFile).classes.first()
+        val rules = project.service<ArchRuleProjectService>().rulesForPackage("com.example")
+            .filterIsInstance<io.github.archunitlens.rules.MemberConventionRule>()
+        assertTrue(rules.any { MemberSubjectEvaluator.matches(it, candidate.fields.first(), "com.example") })
+        assertTrue(
+            "rules=$rules class=${candidate.qualifiedName} implements=${candidate.implementsListTypes.toList()} method=${candidate.methods.first().name}",
+            rules.any { MemberSubjectEvaluator.matches(it, candidate.methods.first(), "com.example") },
+        )
+        assertEquals(listOf("secret", "setName"), warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
+    fun testNegativeRootNegatesEntireConditionTreeExactlyOnce() {
+        addNegativeMemberStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_unannotated = noFields().should()
+                            .notBeAnnotatedWith(com.example.Value.class);
+                    @ArchTest static final ArchRule no_public_or_static = noMethods().should()
+                            .bePublic().orShould().beStatic();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Candidate.java",
+            """
+                package com.example;
+                class Candidate {
+                    @com.example.Value String annotated;
+                    String plain;
+                    public void exposed() {}
+                    private static void utility() {}
+                    private void safe() {}
+                }
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf("plain", "exposed", "utility"),
+            warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+    }
+
+    fun testNegativeMemberRuleWithUnresolvedTargetIsMetadataOnlyAndProducesNoWarning() {
+        addNegativeMemberStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule unresolved = noFields().should()
+                            .beAnnotatedWith(com.example.Missing.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Candidate.java",
+            "package com.example; class Candidate { @com.example.Value String field; }",
+        )
+
+        val discovery = project.service<ArchRuleProjectService>().discoveries().single { it.ruleName == "unresolved" }
+        assertNull(discovery.liveRule)
+        assertTrue((discovery.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnresolvedSymbol)
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testHelperBackedNegativeMemberRuleIsMetadataOnlyAsWholeRuleAndProducesNoWarning() {
+        addNegativeMemberStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule helper_backed = noFields().should(customCondition());
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Candidate.java",
+            "package com.example; class Candidate { @com.example.Value String field; }",
+        )
+
+        val discovery = project.service<ArchRuleProjectService>().discoveries().single { it.ruleName == "helper_backed" }
+        assertNull(discovery.liveRule)
+        assertEquals(
+            UnsupportedReason.HelperBackedCustomCondition,
+            (discovery.descriptor.supportStatus as SupportStatus.Unsupported).reason,
+        )
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testNegativeMemberRuleWithEmptySelectionProducesNoGlobalWarning() {
+        addNegativeMemberStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_setters = noMethods().that()
+                            .areDeclaredInClassesThat().implement(com.example.QueryModel.class)
+                            .should().haveNameMatching("^set[A-Z].*");
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "NotSelected.java",
+            "package com.example; class NotSelected { public void setIgnored() {} }",
+        )
+
+        assertTrue(project.service<ArchRuleProjectService>().rulesForPackage("com.example").any { it is MemberConventionRule })
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testCachedNegativeMemberRuleProducesNoWarningDuringDumbMode() {
+        addNegativeMemberStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_value_fields = noFields().should()
+                            .beAnnotatedWith(com.example.Value.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Candidate.java",
+            "package com.example; class Candidate { @com.example.Value String field; }",
+        )
+        assertEquals(1, warningDescriptions().size)
+
+        DumbModeTestUtils.runInDumbModeSynchronously(project) {
+            val file = myFixture.file as PsiJavaFile
+            val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+            val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+            visitor.visitField(file.classes.single().fields.single())
+
+            assertTrue(holder.results.isEmpty())
+        }
+    }
+
+    fun testNegativeBeanFieldInjectionRuleSupportsDeclaringAndMemberMetaAnnotations() {
+        addNegativeMemberStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_field_injection = noFields().that()
+                            .areDeclaredInClassesThat().areMetaAnnotatedWith(com.example.Component.class)
+                            .should().beMetaAnnotatedWith(com.example.Autowired.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Bean.java",
+            """
+                package com.example;
+                @com.example.Service
+                class Bean { @com.example.Inject Object dependency; }
+            """.trimIndent(),
+        )
+
+        assertEquals(listOf("dependency"), warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
     private fun addPackageDependencyBanRule() {
         addArchitectureRulesFixture("packageDependencyBan")
     }
@@ -1611,6 +1826,22 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         myFixture.addFileToProject(
             "src/test/java/com/other/ResponseEntity.java",
             "package com.other; public class ResponseEntity<T> {}",
+        )
+    }
+
+    private fun addNegativeMemberStubs() {
+        addAnnotationStub("Value")
+        addAnnotationStub("Component")
+        addAnnotationStub("Service", "@com.example.Component")
+        addAnnotationStub("Autowired")
+        addAnnotationStub("Inject", "@com.example.Autowired")
+        myFixture.addFileToProject(
+            "src/test/java/com/example/QueryModel.java",
+            "package com.example; public interface QueryModel {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/other/Value.java",
+            "package com.other; public @interface Value {}",
         )
     }
 

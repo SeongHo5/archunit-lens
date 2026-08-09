@@ -3,6 +3,7 @@ package io.github.archunitlens.rules.evaluator
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiClassType
 import io.github.archunitlens.rules.AnnotationExclusivityRule
 import io.github.archunitlens.rules.ClassConventionRule
 import io.github.archunitlens.rules.ClassMetaAnnotationRule
@@ -149,8 +150,37 @@ object ClassSubjectEvaluator {
     ): Boolean? = when (predicate) {
         PredicateExpr.All -> true
         is PredicateExpr.Leaf -> null
-        is PredicateExpr.AreAnnotatedWith -> aClass.hasAnnotation(predicate.qualifiedName)
-        is PredicateExpr.AreNotAnnotatedWith -> !aClass.hasAnnotation(predicate.qualifiedName)
+        is PredicateExpr.AreAnnotatedWith -> aClass.annotationMatch(predicate.qualifiedName)
+        is PredicateExpr.AreNotAnnotatedWith -> aClass.annotationMatch(predicate.qualifiedName)?.not()
+        is PredicateExpr.AreMetaAnnotatedWith -> {
+            val matched = aClass.modifierList?.annotations
+                ?.any { it.isMetaAnnotatedWith(predicate.qualifiedName) } == true
+            matched == predicate.expected
+        }
+        is PredicateExpr.AreAssignableTo -> {
+            val target = JavaPsiFacade.getInstance(aClass.project).findClass(predicate.qualifiedName, aClass.resolveScope)
+                ?: return null
+            (aClass == target || aClass.isInheritor(target, true)) == predicate.expected
+        }
+        is PredicateExpr.Implement -> {
+            val target = aClass.implementsListTypes
+                .mapNotNull(PsiClassType::resolve)
+                .firstOrNull { it.qualifiedName == predicate.qualifiedName }
+                ?: JavaPsiFacade.getInstance(aClass.project).findClass(predicate.qualifiedName, aClass.resolveScope)
+                    ?.takeIf { it.isInterface } ?: return null
+            val implementsTarget = !aClass.isInterface &&
+                (
+                    aClass.implementsListTypes.any {
+                        it.canonicalText == target.qualifiedName || it.resolve()?.qualifiedName == target.qualifiedName
+                    } ||
+                        aClass.implementsList?.referenceElements?.any {
+                            it.qualifiedName == target.qualifiedName || (it.resolve() as? PsiClass)?.qualifiedName == target.qualifiedName
+                        } == true ||
+                        aClass.interfaces.any { it.qualifiedName == target.qualifiedName } ||
+                        aClass.isInheritor(target, true)
+                    )
+            implementsTarget == predicate.expected
+        }
         is PredicateExpr.ResideInPackages -> predicate.patterns.any { PackagePattern.matches(it, packageName) }
         is PredicateExpr.HaveSimpleNameEndingWith -> aClass.name?.endsWith(predicate.suffix)
         is PredicateExpr.HaveSimpleNameNotEndingWith -> aClass.name?.endsWith(predicate.suffix)?.not()
@@ -165,6 +195,17 @@ object ClassSubjectEvaluator {
             val left = evaluatePredicate(aClass, packageName, predicate.left) ?: return null
             val right = evaluatePredicate(aClass, packageName, predicate.right) ?: return null
             left || right
+        }
+    }
+
+    private fun PsiClass.annotationMatch(qualifiedName: String): Boolean? {
+        val matches = modifierList?.annotations.orEmpty().map { annotation ->
+            annotation.resolveAnnotationType()?.qualifiedName?.let { it == qualifiedName }
+        }
+        return when {
+            matches.any { it == true } -> true
+            matches.any { it == null } -> null
+            else -> false
         }
     }
 
