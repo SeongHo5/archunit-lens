@@ -41,6 +41,12 @@ object ClassSubjectEvaluator {
         packageName: String,
     ): Boolean = rule.analyzeScope.includes(packageName) && evaluatePredicate(aClass, packageName, rule.predicate) == true
 
+    internal fun matchesPredicate(
+        aClass: PsiClass,
+        packageName: String,
+        predicate: PredicateExpr,
+    ): Boolean? = evaluatePredicate(aClass, packageName, predicate)
+
     internal fun violations(
         rule: ClassConventionRule,
         aClass: PsiClass,

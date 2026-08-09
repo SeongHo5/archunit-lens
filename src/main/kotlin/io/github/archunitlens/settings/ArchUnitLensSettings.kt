@@ -28,6 +28,7 @@ class ArchUnitLensSettingsState {
     var dependencyRulesEnabled: Boolean = true
     var annotationRulesEnabled: Boolean = true
     var interfaceRulesEnabled: Boolean = true
+    var memberDeclarationRulesEnabled: Boolean = true
     var showSupportedRulesInOverview: Boolean = true
     var showUnsupportedRulesInOverview: Boolean = true
     var showDiagnosticsInOverview: Boolean = true

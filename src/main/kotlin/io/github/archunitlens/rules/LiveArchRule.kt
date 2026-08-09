@@ -113,3 +113,17 @@ data class MethodMetaAnnotationRule(
     override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
     override val reason: String? = null,
 ) : LiveArchRule
+
+/**
+ * A positive method or constructor declaration convention composed from typed
+ * selector and condition facts.
+ */
+data class MemberConventionRule(
+    override val ruleName: String,
+    val subject: MemberSubjectKind,
+    val predicate: MemberPredicateExpr,
+    val condition: MemberConditionExpr,
+    override val sourcePointer: SmartPsiElementPointer<out PsiElement>,
+    override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
+    override val reason: String? = null,
+) : LiveArchRule

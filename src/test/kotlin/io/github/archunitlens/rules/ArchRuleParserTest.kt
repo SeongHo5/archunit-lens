@@ -971,7 +971,7 @@ class ArchRuleParserTest : BasePlatformTestCase() {
                 "classes",
             ),
             exactRule("methods().should().bePublic()", "methods"),
-            exactRule("constructors().should().bePrivate()", "constructors"),
+            exactRule("constructors().should().bePublic()", "constructors"),
         )
 
         rules.forEach { ruleSource ->
@@ -1091,6 +1091,61 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertTrue(status.reason is UnsupportedReason.UnsupportedArgument)
     }
 
+    fun testParsesPositiveMethodAndConstructorDeclarationConventions() {
+        addMemberConventionStubs()
+        val file = configureJava(testData("archrules/methodConstructorConventions.java"))
+        val discoveries = ArchRuleSourceFinder.findInFile(file)
+            .mapNotNull(ArchRuleParser::discover)
+            .associateBy { it.ruleName }
+
+        val constructorRule = discoveries.getValue("utility_constructors_are_private").liveRule as? MemberConventionRule
+        assertEquals(MemberSubjectKind.Constructors, constructorRule?.subject)
+        assertEquals(MemberConditionExpr.BePrivate, constructorRule?.condition)
+        assertEquals(
+            MemberPredicateExpr.DeclaredInClasses(PredicateExpr.ResideInPackages(listOf("..util.."))),
+            constructorRule?.predicate,
+        )
+
+        val staticMethodRule = discoveries.getValue("utility_methods_are_static").liveRule as? MemberConventionRule
+        assertEquals(MemberSubjectKind.Methods, staticMethodRule?.subject)
+        assertEquals(MemberConditionExpr.BeStatic, staticMethodRule?.condition)
+
+        val returnTypeRule = discoveries.getValue("controller_mappings_return_response_entity").liveRule as? MemberConventionRule
+        assertEquals(
+            MemberConditionExpr.HaveRawReturnType("com.example.ResponseEntity"),
+            returnTypeRule?.condition,
+        )
+        assertEquals(
+            MemberPredicateExpr.And(
+                MemberPredicateExpr.IsAnnotatedWith("com.example.RequestMapping", metaAnnotated = true),
+                MemberPredicateExpr.DeclaredInClasses(PredicateExpr.AreAnnotatedWith("com.example.RestController")),
+            ),
+            returnTypeRule?.predicate,
+        )
+    }
+
+    fun testPositiveMemberConventionRejectsUnresolvedAndUnsupportedSiblingsAsWholeRule() {
+        addMemberConventionStubs()
+        val unsupportedRules = listOf(
+            "methods().that().areMetaAnnotatedWith(com.example.Missing.class).should().beStatic()",
+            "methods().that().areDeclaredInClassesThat().resideInAPackage(utilityPackage).should().beStatic()",
+            "methods().that().areDeclaredInClassesThat().resideInAPackage(\"..util..\")" +
+                ".and().areAnnotatedWith(com.example.RequestMapping.class).should().beStatic()",
+            "methods().that().areDeclaredInClassesThat().resideInAPackage(\"..util..\")" +
+                ".should().beStatic().orShould().haveRawReturnType(com.example.ResponseEntity.class)",
+            "methods().that().should().beStatic()",
+            "constructors().that().areAnnotatedWith(com.example.RequestMapping.class).should().bePrivate()",
+            "constructors().that().areDeclaredInClassesThat().resideInAPackage(\"..util..\")" +
+                ".should().bePrivate(helper())",
+        )
+
+        unsupportedRules.forEachIndexed { index, initializer ->
+            val discovered = discoverSingleRule(exactRule(initializer, initializer.substringBefore('(')))
+            assertNull("case $index", discovered.liveRule)
+            assertTrue("case $index", discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        }
+    }
+
     private fun exactHandlerCases(): List<Pair<ExactHandlerFamily, String>> = listOf(
         ExactHandlerFamily.PACKAGE_DEPENDENCY_BAN to exactRule(
             "noClasses().that().resideInAPackage(\"..domain..\").should().dependOnClassesThat().resideInAPackage(\"..adapter..\")",
@@ -1174,6 +1229,21 @@ class ArchRuleParserTest : BasePlatformTestCase() {
     }
 
     private fun configureJava(code: String): PsiFile = myFixture.configureByText("ArchitectureRules.java", code)
+
+    private fun addMemberConventionStubs() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/RequestMapping.java",
+            "package com.example; public @interface RequestMapping {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/RestController.java",
+            "package com.example; public @interface RestController {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/ResponseEntity.java",
+            "package com.example; public class ResponseEntity<T> {}",
+        )
+    }
 
     private fun testData(path: String): String = Path.of("src/test/testData", path).toFile().readText()
 }

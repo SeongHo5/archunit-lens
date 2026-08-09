@@ -13,6 +13,7 @@ class ArchUnitLensSettingsTest : BasePlatformTestCase() {
         assertTrue(state.dependencyRulesEnabled)
         assertTrue(state.annotationRulesEnabled)
         assertTrue(state.interfaceRulesEnabled)
+        assertTrue(state.memberDeclarationRulesEnabled)
         assertTrue(state.showSupportedRulesInOverview)
         assertTrue(state.showUnsupportedRulesInOverview)
         assertTrue(state.showDiagnosticsInOverview)
