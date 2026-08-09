@@ -69,7 +69,7 @@ internal class StaticClassFactResolver(
         }
         val values = field.initializer.literalStringArrayValues()
             ?: return StaticArgumentResult.Unsupported("package list '${field.name}' is not literal-only")
-        owner.arrayFieldSafetyFailure(field, reference)?.let { return StaticArgumentResult.Unsupported(it) }
+        owner.enclosingNest().arrayFieldSafetyFailure(field, reference)?.let { return StaticArgumentResult.Unsupported(it) }
         return StaticArgumentResult.Resolved(values)
     }
 
@@ -122,6 +122,13 @@ internal class StaticClassFactResolver(
             return "package list '${field.name}' escapes the supported DSL use"
         }
         return null
+    }
+
+    private fun PsiClass.enclosingNest(): PsiClass {
+        var nestHost = this
+        while (true) {
+            nestHost = nestHost.containingClass ?: return nestHost
+        }
     }
 
     private fun PsiExpression.unwrapped(): PsiExpression = when (this) {

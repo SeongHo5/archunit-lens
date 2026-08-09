@@ -1062,6 +1062,50 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         }
     }
 
+    fun testRejectsStaticPackageArraysMutatedElsewhereInTheirEnclosingNest() {
+        val cases = mapOf(
+            "enclosing" to """
+                class ArchitectureRules {
+                    static class NestedRules {
+                        private static final String[] PACKAGES = {"..util.."};
+                        @ArchTest static final ArchRule rule = classes().that()
+                                .resideInAnyPackage(PACKAGES).should().beRecords();
+                    }
+                    static { NestedRules.PACKAGES[0] = "..changed.."; }
+                }
+            """,
+            "sibling" to """
+                class ArchitectureRules {
+                    static class NestedRules {
+                        private static final String[] PACKAGES = {"..util.."};
+                        @ArchTest static final ArchRule rule = classes().that()
+                                .resideInAnyPackage(PACKAGES).should().beRecords();
+                    }
+                    static class Mutator {
+                        static { NestedRules.PACKAGES[0] = "..changed.."; }
+                    }
+                }
+            """,
+        )
+
+        cases.forEach { (name, code) ->
+            val discovered = discoverSingleRule(
+                """
+                    import com.tngtech.archunit.junit.ArchTest;
+                    import com.tngtech.archunit.lang.ArchRule;
+                    import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                    $code
+                """.trimIndent(),
+            )
+
+            assertNull("$name nest mutation must stay metadata-only", discovered.liveRule)
+            assertTrue(
+                "$name nest mutation must identify the unsupported argument",
+                (discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnsupportedArgument,
+            )
+        }
+    }
+
     fun testUnresolvedMetaAnnotationAndUnsupportedSiblingStayMetadataOnly() {
         val unresolved = discoverSingleRule(
             classConventionRule(
