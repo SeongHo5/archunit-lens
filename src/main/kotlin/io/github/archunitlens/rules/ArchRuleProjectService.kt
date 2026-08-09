@@ -377,7 +377,12 @@ private fun PsiJavaFile.requiresTypeResolution(): Boolean {
     val hasMemberEntryPoint = methodCalls.any { it.methodExpression.referenceName in setOf("methods", "constructors") }
     return hasMemberEntryPoint &&
         methodCalls.any {
-            it.methodExpression.referenceName in setOf("areAnnotatedWith", "areMetaAnnotatedWith", "haveRawReturnType")
+            it.methodExpression.referenceName in setOf(
+                "areAnnotatedWith",
+                "areNotAnnotatedWith",
+                "areMetaAnnotatedWith",
+                "haveRawReturnType",
+            )
         }
 }
 
