@@ -1321,6 +1321,58 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertEquals(listOf("out", "printStackTrace"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
     }
 
+    fun testExactCodeAccessErasesGenericReceiverTypeParameters() {
+        addCodeAccessJdkStubs()
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/Object.java",
+            "package java.lang; public class Object { public String toString() { return \"\"; } }",
+        )
+        addArchitectureRulesFixture("exactCodeAccess")
+        myFixture.configureByText(
+            "GenericAccesses.java",
+            """
+                package com.example;
+
+                class GenericAccesses<
+                        T extends java.lang.Throwable,
+                        E extends java.lang.Exception,
+                        C extends CustomFailure,
+                        U> {
+                    void inspect(T exactBound, E differentBound, C overriddenBound, U unbounded) {
+                        exactBound.printStackTrace();
+                        differentBound.printStackTrace();
+                        overriddenBound.printStackTrace();
+                        overriddenBound.printStackTrace("overload");
+                        unbounded.toString();
+                    }
+                }
+
+                class CustomFailure extends java.lang.Exception {
+                    @Override public void printStackTrace() {}
+                    void printStackTrace(java.lang.String message) {}
+                }
+            """.trimIndent(),
+        )
+
+        val resolvedTargets = PsiTreeUtil.findChildrenOfType(myFixture.file, PsiMethodCallExpression::class.java)
+            .map(ExactCodeAccessEvaluator::resolveMethodCall)
+        assertEquals(
+            listOf(
+                "java.lang.Throwable.printStackTrace/[]",
+                "java.lang.Exception.printStackTrace/[]",
+                "com.example.CustomFailure.printStackTrace/[]",
+                "com.example.CustomFailure.printStackTrace/[java.lang.String]",
+                "java.lang.Object.toString/[]",
+            ),
+            resolvedTargets.map { target ->
+                "${target?.ownerQualifiedName}.${target?.methodName}/${target?.parameterTypeQualifiedNames}"
+            },
+        )
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 1, warnings.size)
+        assertEquals("printStackTrace", myFixture.file.text.substring(warnings.single().startOffset, warnings.single().endOffset))
+    }
+
     fun testExactCodeAccessIncludesAccessesInsideTargetClassLambdas() {
         addCodeAccessJdkStubs()
         addArchitectureRulesFixture("exactCodeAccess")

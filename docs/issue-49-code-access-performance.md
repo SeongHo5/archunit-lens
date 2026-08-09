@@ -10,7 +10,7 @@ The representative fixture contains 1,000 unrelated `helper()` calls plus one `S
 
 The visitor is built once against IntelliJ IDEA 2025.2.6.2 test fixtures. Three complete passes warm PSI and indexes, followed by ten measured passes. Gradle runs on Temurin 21.0.11 and the fixture executor runs on the bundled JBR 21.0.9. Timing is evidence rather than a threshold because host load and PSI caches vary; the enforced regression gate is the exact resolution count.
 
-The final verification fixture observed 1,007 reference-expression callbacks and 1,002 method-call callbacks per pass. Only the `out` and `printStackTrace` candidates resolved, and the ten-pass median was 250,500 ns (about 0.25 ms) after warmup.
+The final verification fixture observed 1,007 reference-expression callbacks and 1,002 method-call callbacks per pass. Only the `out` and `printStackTrace` candidates resolved, and the ten-pass median was 266,500 ns (about 0.27 ms) after warmup.
 
 ## Dynamic unload review
 
