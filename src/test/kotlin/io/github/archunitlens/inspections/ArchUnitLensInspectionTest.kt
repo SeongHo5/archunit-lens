@@ -10,8 +10,12 @@ import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiMethodCallExpression
+import com.intellij.psi.PsiReferenceExpression
 import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.testFramework.DumbModeTestUtils
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
 import io.github.archunitlens.ArchUnitLensBundle
@@ -20,6 +24,7 @@ import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.ClassNameSuffixRule
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
+import io.github.archunitlens.rules.evaluator.ExactCodeAccessEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.nio.file.Path
 
@@ -1226,23 +1231,244 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
-    fun testDeferredCodeAccessRulesProduceNoWarning() {
-        addArchitectureRulesFixture("deferredCodeAccess")
+    fun testExactCodeAccessRulesHighlightMemberNamesWithExactMessages() {
+        addCodeAccessJdkStubs()
+        addArchitectureRulesFixture("exactCodeAccess")
         myFixture.configureByText(
             "LegacyPrinter.java",
             """
                 package com.example;
 
                 class LegacyPrinter {
-                    void print(Throwable failure) {
-                        System.out.println(failure.getMessage());
+                    void print(java.lang.Throwable failure) {
+                        java.lang.System.out.println("failed");
+                        java.lang.System.err.println("failed");
                         failure.printStackTrace();
                     }
                 }
             """.trimIndent(),
         )
 
-        assertTrue(warningDescriptions().isEmpty())
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 3, warnings.size)
+        assertEquals(listOf("out", "err", "printStackTrace"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+        assertEquals(
+            listOf(
+                ArchUnitLensBundle.message("inspection.problem.message", "no_system_streams") + "\n" +
+                    ArchUnitLensBundle.message("inspection.problem.fieldAccess", "java.lang.System", "out"),
+                ArchUnitLensBundle.message("inspection.problem.message", "no_system_streams") + "\n" +
+                    ArchUnitLensBundle.message("inspection.problem.fieldAccess", "java.lang.System", "err"),
+                ArchUnitLensBundle.message("inspection.problem.message", "no_print_stack_trace") + "\n" +
+                    ArchUnitLensBundle.message(
+                        "inspection.problem.methodCall",
+                        "java.lang.Throwable",
+                        "printStackTrace",
+                        "",
+                    ),
+            ),
+            warnings.map { it.description },
+        )
+    }
+
+    fun testExactCodeAccessUsesResolvedOwnerSignatureAndStaticImportUse() {
+        addCodeAccessJdkStubs()
+        addArchitectureRulesFixture("exactCodeAccess")
+        myFixture.addFileToProject(
+            "src/main/java/com/example/Other.java",
+            "package com.example; class Other { static java.io.PrintStream out; }",
+        )
+        myFixture.configureByText(
+            "ResolvedAccesses.java",
+            """
+                package com.example;
+
+                import static java.lang.System.out;
+
+                class ResolvedAccesses {
+                    void inspect(java.lang.Throwable exact, java.lang.Exception inherited, CustomFailure overridden) {
+                        out.println("exact static import use");
+                        Other.out.println("different owner");
+                        exact.printStackTrace();
+                        inherited.printStackTrace();
+                        overridden.printStackTrace();
+                        overridden.printStackTrace("overload");
+                    }
+                }
+
+                class CustomFailure extends java.lang.Exception {
+                    @Override public void printStackTrace() {}
+                    void printStackTrace(java.lang.String message) {}
+                }
+            """.trimIndent(),
+        )
+
+        val resolvedTargets = PsiTreeUtil.findChildrenOfType(myFixture.file, PsiMethodCallExpression::class.java)
+            .filter { it.methodExpression.referenceName == "printStackTrace" }
+            .map(ExactCodeAccessEvaluator::resolveMethodCall)
+        assertEquals(
+            listOf(
+                "java.lang.Throwable.printStackTrace/[]",
+                "java.lang.Exception.printStackTrace/[]",
+                "com.example.CustomFailure.printStackTrace/[]",
+                "com.example.CustomFailure.printStackTrace/[java.lang.String]",
+            ),
+            resolvedTargets.map { target ->
+                "${target?.ownerQualifiedName}.${target?.methodName}/${target?.parameterTypeQualifiedNames}"
+            },
+        )
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 2, warnings.size)
+        assertEquals(listOf("out", "printStackTrace"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
+    fun testExactCodeAccessIncludesAccessesInsideTargetClassLambdas() {
+        addCodeAccessJdkStubs()
+        addArchitectureRulesFixture("exactCodeAccess")
+        myFixture.configureByText(
+            "LambdaAccess.java",
+            """
+                package com.example;
+
+                class LambdaAccess {
+                    Runnable printer(java.lang.Throwable failure) {
+                        return () -> failure.printStackTrace();
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 1, warnings.size)
+        assertEquals("printStackTrace", myFixture.file.text.substring(warnings.single().startOffset, warnings.single().endOffset))
+    }
+
+    fun testExactCodeAccessFailsClosedForUnresolvedAndDumbMode() {
+        addCodeAccessJdkStubs()
+        addArchitectureRulesFixture("exactCodeAccess")
+        myFixture.configureByText(
+            "UnresolvedAccess.java",
+            "package com.example; class UnresolvedAccess { void run() { Missing.out.println(); missing.printStackTrace(); } }",
+        )
+        assertTrue(warningHighlights().isEmpty())
+
+        myFixture.configureByText(
+            "DumbAccess.java",
+            "package com.example; class DumbAccess { void run(java.lang.Throwable failure) { java.lang.System.out.println(); failure.printStackTrace(); } }",
+        )
+        DumbModeTestUtils.runInDumbModeSynchronously(project) {
+            val file = myFixture.file as PsiJavaFile
+            val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+            val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+            PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java).forEach(visitor::visitReferenceExpression)
+            PsiTreeUtil.findChildrenOfType(file, PsiMethodCallExpression::class.java).forEach(visitor::visitMethodCallExpression)
+            assertTrue(holder.results.isEmpty())
+        }
+    }
+
+    fun testCodeAccessNamePrefilterResolvesEachCandidateAtMostOnce() {
+        addCodeAccessJdkStubs()
+        addArchitectureRulesFixture("exactCodeAccess")
+        val file = myFixture.configureByText(
+            "ResolveCounts.java",
+            """
+                package com.example;
+                class ResolveCounts {
+                    void run(java.lang.Throwable failure) {
+                        java.lang.System.out.println("candidate");
+                        failure.printStackTrace();
+                        failure.getMessage();
+                        java.lang.System.lineSeparator();
+                    }
+                }
+            """.trimIndent(),
+        ) as PsiJavaFile
+        val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+        val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+        val activeRules = project.service<ArchRuleProjectService>().rulesForPackage(file.packageName)
+        assertTrue(activeRules.toString(), activeRules.any { it is io.github.archunitlens.rules.NoClassesCodeAccessRule })
+        var fieldResolves = 0
+        var methodResolves = 0
+
+        PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java).forEach { reference ->
+            val counting = object : PsiReferenceExpression by reference {
+                override fun resolve(): PsiElement? {
+                    fieldResolves++
+                    return reference.resolve()
+                }
+            }
+            visitor.visitReferenceExpression(counting)
+        }
+        PsiTreeUtil.findChildrenOfType(file, PsiMethodCallExpression::class.java).forEach { call ->
+            val counting = object : PsiMethodCallExpression by call {
+                override fun resolveMethod(): PsiMethod? {
+                    methodResolves++
+                    return call.resolveMethod()
+                }
+            }
+            visitor.visitMethodCallExpression(counting)
+        }
+
+        val referenceNames = PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java).map { it.referenceName }
+        val methodNames = PsiTreeUtil.findChildrenOfType(file, PsiMethodCallExpression::class.java).map { it.methodExpression.referenceName }
+        assertEquals(referenceNames.toString(), 1, fieldResolves)
+        assertEquals(methodNames.toString(), 1, methodResolves)
+    }
+
+    fun testCodeAccessPrefilterRepresentativeJavaBodyTiming() {
+        addCodeAccessJdkStubs()
+        addArchitectureRulesFixture("exactCodeAccess")
+        val unrelatedCalls = (1..1_000).joinToString("\n") { "helper();" }
+        val file = myFixture.configureByText(
+            "RepresentativeBody.java",
+            """
+                package com.example;
+                class RepresentativeBody {
+                    void run(java.lang.Throwable failure) {
+                        java.lang.System.out.println();
+                        failure.printStackTrace();
+                        $unrelatedCalls
+                    }
+                    void helper() {}
+                }
+            """.trimIndent(),
+        ) as PsiJavaFile
+        val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+        val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+        val references = PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java)
+        val calls = PsiTreeUtil.findChildrenOfType(file, PsiMethodCallExpression::class.java)
+        var fieldResolves = 0
+        var methodResolves = 0
+        val countingReferences = references.map { reference ->
+            object : PsiReferenceExpression by reference {
+                override fun resolve(): PsiElement? {
+                    fieldResolves++
+                    return reference.resolve()
+                }
+            }
+        }
+        val countingCalls = calls.map { call ->
+            object : PsiMethodCallExpression by call {
+                override fun resolveMethod(): PsiMethod? {
+                    methodResolves++
+                    return call.resolveMethod()
+                }
+            }
+        }
+        val pass = {
+            countingReferences.forEach(visitor::visitReferenceExpression)
+            countingCalls.forEach(visitor::visitMethodCallExpression)
+        }
+
+        repeat(3) { pass() }
+        val durations = List(10) { kotlin.system.measureNanoTime(pass) }
+        val medianNanos = durations.sorted()[durations.size / 2]
+
+        assertEquals(13, fieldResolves)
+        assertEquals(13, methodResolves)
+        println(
+            "CODE_ACCESS_TIMING references=${references.size} calls=${calls.size} " +
+                "candidateResolves=2 medianNanos=$medianNanos",
+        )
     }
 
     private fun addPackageDependencyBanRule() {
@@ -1305,6 +1531,31 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
 
     private fun addArchitectureRules(code: String) {
         myFixture.addFileToProject("src/test/java/com/example/ArchitectureRules.java", code)
+    }
+
+    private fun addCodeAccessJdkStubs() {
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/String.java",
+            "package java.lang; public final class String {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/io/PrintStream.java",
+            "package java.io; public class PrintStream { public void println() {} public void println(String value) {} }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/Throwable.java",
+            "package java.lang; public class Throwable { public void printStackTrace() {} }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/Exception.java",
+            "package java.lang; public class Exception extends java.lang.Throwable {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/System.java",
+            "package java.lang; public final class System { " +
+                "public static java.io.PrintStream out; public static java.io.PrintStream err; " +
+                "public static String lineSeparator() { return \"\"; } }",
+        )
     }
 
     private fun addArchitectureRulesFixture(name: String) {

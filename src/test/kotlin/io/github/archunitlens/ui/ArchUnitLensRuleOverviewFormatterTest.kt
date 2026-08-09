@@ -10,6 +10,10 @@ import java.nio.file.Path
 class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
     fun testFormatsSupportedAndUnsupportedDiscoveriesWithScanMetrics() {
         myFixture.addFileToProject(
+            "src/test/java/java/lang/System.java",
+            "package java.lang; public final class System { public static Object out; public static Object err; }",
+        )
+        myFixture.addFileToProject(
             "src/test/java/com/example/ArchitectureRules.java",
             """
                 import com.tngtech.archunit.junit.AnalyzeClasses;
@@ -36,6 +40,11 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
                     static final ArchRule custom_proxy_helper_is_unsupported =
                             classes().that().areInterfaces()
                                     .should().notBeMetaAnnotatedWith(proxyAnnotations());
+
+                    @ArchTest
+                    static final ArchRule no_system_streams = noClasses()
+                            .should().accessField(java.lang.System.class, "out")
+                            .orShould().accessField(java.lang.System.class, "err");
                 }
             """.trimIndent(),
         )
@@ -54,6 +63,8 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         assertTrue(output.contains(ArchUnitLensBundle.message("overview.reason", "Services stay explicit.")))
         assertTrue(output.contains("multi_package_dependency_shape"))
         assertTrue(output.contains("custom_proxy_helper_is_unsupported"))
+        assertTrue(output.contains("no_system_streams"))
+        assertTrue(output.contains("(accessField(java.lang.System.out) OR accessField(java.lang.System.err))"))
         assertTrue(
             output.contains(
                 statusLine(

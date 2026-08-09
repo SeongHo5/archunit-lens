@@ -275,7 +275,10 @@ internal object ArchUnitLensRuleOverviewFormatter {
         is ConditionExpr.BeInterfaces -> if (required) "beInterfaces" else "notBeInterfaces"
         is ConditionExpr.BeEnums -> if (required) "beEnums" else "notBeEnums"
         is ConditionExpr.BeAssignableTo -> "beAssignableTo($qualifiedName)"
+        is ConditionExpr.AccessField -> "accessField($ownerQualifiedName.$fieldName)"
+        is ConditionExpr.CallMethod -> "callMethod($ownerQualifiedName.$methodName(${parameterTypeQualifiedNames.joinToString()}))"
         is ConditionExpr.And -> "(${left.display()} AND ${right.display()})"
+        is ConditionExpr.Or -> "(${left.display()} OR ${right.display()})"
     }
 
     private fun indented(

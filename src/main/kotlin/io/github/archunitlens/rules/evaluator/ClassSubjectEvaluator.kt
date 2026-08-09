@@ -218,5 +218,9 @@ object ClassSubjectEvaluator {
             val right = evaluateCondition(aClass, packageName, condition.right) ?: return null
             left + right
         }
+        is ConditionExpr.AccessField,
+        is ConditionExpr.CallMethod,
+        is ConditionExpr.Or,
+        -> null
     }
 }

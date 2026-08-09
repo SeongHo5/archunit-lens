@@ -3,6 +3,7 @@ package io.github.archunitlens.inspections
 import com.intellij.codeInspection.LocalInspectionTool
 import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.openapi.components.service
+import com.intellij.openapi.project.DumbService
 import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiClass
@@ -11,7 +12,9 @@ import com.intellij.psi.PsiImportStatement
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.PsiModifierList
+import com.intellij.psi.PsiReferenceExpression
 import com.intellij.psi.util.PsiTreeUtil
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.AnnotationExclusivityRule
@@ -24,9 +27,11 @@ import io.github.archunitlens.rules.ForbiddenAnnotationRule
 import io.github.archunitlens.rules.InterfaceNamingRule
 import io.github.archunitlens.rules.LiveArchRule
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
+import io.github.archunitlens.rules.NoClassesCodeAccessRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 import io.github.archunitlens.rules.PredicateExpr
 import io.github.archunitlens.rules.evaluator.ClassSubjectEvaluator
+import io.github.archunitlens.rules.evaluator.ExactCodeAccessEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import io.github.archunitlens.settings.ArchUnitLensSettingsState
 
@@ -69,8 +74,48 @@ class ArchUnitLensInspection : LocalInspectionTool() {
         val classMetaAnnotationRules = rules.filterIsInstance<ClassMetaAnnotationRule>()
         val methodMetaAnnotationRules = rules.filterIsInstance<MethodMetaAnnotationRule>()
         val classConventionRules = rules.filterIsInstance<ClassConventionRule>()
+        val codeAccessRules = rules.filterIsInstance<NoClassesCodeAccessRule>()
+        val fieldAccessRulesByName = codeAccessRules
+            .flatMap { rule -> rule.condition.codeAccessLeaves().filterIsInstance<ConditionExpr.AccessField>().map { rule to it } }
+            .groupBy { it.second.fieldName }
+        val methodCallRulesByName = codeAccessRules
+            .flatMap { rule -> rule.condition.codeAccessLeaves().filterIsInstance<ConditionExpr.CallMethod>().map { rule to it } }
+            .groupBy { it.second.methodName }
+        val codeAccessAllowedAtBuild = !DumbService.isDumb(holder.project)
 
         return object : JavaElementVisitor() {
+            override fun visitReferenceExpression(expression: PsiReferenceExpression) {
+                if (!codeAccessAllowedAtBuild || DumbService.isDumb(holder.project)) return
+                if (expression.parent is PsiMethodCallExpression) return
+                if (PsiTreeUtil.getParentOfType(expression, PsiImportStatement::class.java) != null) return
+                val candidates = fieldAccessRulesByName[expression.referenceName] ?: return
+                val access = ExactCodeAccessEvaluator.resolveFieldAccess(expression) ?: return
+                candidates.firstOrNull { (_, condition) -> ExactCodeAccessEvaluator.matches(condition, access) }
+                    ?.let { (rule, condition) ->
+                        val violation = ArchUnitViolation.ForbiddenFieldAccess(rule, condition)
+                        holder.registerProblem(
+                            expression.referenceNameElement ?: expression,
+                            violation.problemMessage(),
+                            *violation.quickFixes(),
+                        )
+                    }
+            }
+
+            override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
+                if (!codeAccessAllowedAtBuild || DumbService.isDumb(holder.project)) return
+                val candidates = methodCallRulesByName[expression.methodExpression.referenceName] ?: return
+                val call = ExactCodeAccessEvaluator.resolveMethodCall(expression) ?: return
+                candidates.firstOrNull { (_, condition) -> ExactCodeAccessEvaluator.matches(condition, call) }
+                    ?.let { (rule, condition) ->
+                        val violation = ArchUnitViolation.ForbiddenMethodCall(rule, condition)
+                        holder.registerProblem(
+                            expression.methodExpression.referenceNameElement ?: expression.methodExpression,
+                            violation.problemMessage(),
+                            *violation.quickFixes(),
+                        )
+                    }
+            }
+
             override fun visitImportStatement(statement: PsiImportStatement) {
                 if (statement.isOnDemand) return
                 val importedName = statement.qualifiedName ?: return
@@ -251,6 +296,12 @@ private fun LiveArchRule.isEnabledBy(
     is MethodMetaAnnotationRule,
     -> settings.annotationRulesEnabled
     is InterfaceNamingRule -> settings.interfaceRulesEnabled
+    is NoClassesCodeAccessRule -> settings.dependencyRulesEnabled
+}
+
+private fun ConditionExpr.codeAccessLeaves(): List<ConditionExpr> = when (this) {
+    is ConditionExpr.Or -> left.codeAccessLeaves() + right.codeAccessLeaves()
+    else -> listOf(this)
 }
 
 private fun PredicateExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Boolean = when (this) {
@@ -281,4 +332,8 @@ private fun ConditionExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     is ConditionExpr.BeAssignableTo,
     -> settings.interfaceRulesEnabled
     is ConditionExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
+    is ConditionExpr.AccessField,
+    is ConditionExpr.CallMethod,
+    -> settings.dependencyRulesEnabled
+    is ConditionExpr.Or -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
 }

@@ -113,3 +113,16 @@ data class MethodMetaAnnotationRule(
     override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
     override val reason: String? = null,
 ) : LiveArchRule
+
+/**
+ * Rule forbidding classes from performing any exact access represented by
+ * [condition]. The parser only creates this rule from a complete `noClasses()`
+ * chain whose code-access siblings are all statically supported.
+ */
+data class NoClassesCodeAccessRule(
+    override val ruleName: String,
+    val condition: ConditionExpr,
+    override val sourcePointer: SmartPsiElementPointer<out PsiElement>,
+    override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
+    override val reason: String? = null,
+) : LiveArchRule

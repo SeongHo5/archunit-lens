@@ -418,6 +418,31 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         }
     }
 
+    fun testExactCodeAccessRuleUsesAnalyzeClassesPackageScope() {
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/Throwable.java",
+            "package java.lang; public class Throwable { public void printStackTrace() {} }",
+        )
+        addArchitectureRules(
+            "ArchitectureRules.java",
+            """
+                import com.tngtech.archunit.junit.AnalyzeClasses;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                @AnalyzeClasses(packages = "com.example.app")
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_print_stack_trace = noClasses()
+                            .should().callMethod(java.lang.Throwable.class, "printStackTrace");
+                }
+            """.trimIndent(),
+        )
+        val service = project.service<ArchRuleProjectService>()
+
+        assertTrue(service.rulesForPackage("com.example.app").single() is NoClassesCodeAccessRule)
+        assertTrue(service.rulesForPackage("com.example.other").isEmpty())
+    }
+
     private fun addArchitectureRules(
         fileName: String,
         code: String,

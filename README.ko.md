@@ -54,11 +54,14 @@ ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live wa
 - 모든 leaf가 정적으로 지원될 때 left-associative class predicate `and()` / `or()`와 독립적인 `andShould()` condition
 - `beAssignableTo(...)` 대상이 resolve되는 QueryMapper 형태 interface rule
 - direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule
+- 모든 sibling이 지원되는 bounded `orShould()`를 포함한 exact `noClasses()` field access 및 zero-argument method call
 - `@AnalyzeClasses(packages = ...)` scope와 `.because("...")` reason 표시
 
 ## Rule Overview
 
 오른쪽 tool window bar에서 **ArchUnit Lens**를 열면 발견된 rule을 확인할 수 있습니다. overview에는 지원/미지원 rule field filter, rule 이름 검색, source navigation, 현재 파일 기준 보기, subject/unsupported reason grouping, reason, scan metrics, package cache metrics, indexing/stale fallback 진단이 표시됩니다.
+
+![Rule Overview의 exact code-access rule](docs/images/issue-49-exact-code-access-overview.png)
 
 ## Quick Fix
 
@@ -73,15 +76,15 @@ dependency 위반은 navigation/explanation 중심입니다. 플러그인은 imp
 
 ArchUnit Lens는 ArchUnit rule이나 사용자/프로젝트 코드를 실행하지 않습니다. 현재 다음에는 live warning을 만들지 않습니다.
 
-- custom `ArchCondition`, `DescribedPredicate`, helper method, lambda
+- custom `ArchCondition`, `DescribedPredicate`, helper method, rule-side lambda
 - method-style `@ArchTest` rule
 - Kotlin ArchUnit rule parsing 또는 Kotlin target-source inspection
 - resolved referenced class가 없는 unused wildcard import statement
 - resolve되지 않는 dependency reference. resolve 실패는 의도적으로 warning을 만들지 않습니다.
 - literal meta-annotation subset 밖의 임의 method/member subject rule
 - issue #24로 추적하는 method/constructor declaration convention
-- body-level `callMethod(...)`, `accessField(...)` 검사. 현재 결정은 [`docs/issue-25-code-access-decision.md`](docs/issue-25-code-access-decision.md)에 기록되어 있습니다.
-- condition `orShould()` 또는 custom, dynamic, helper-backed, unresolved leaf가 하나라도 포함된 boolean tree
+- parameter가 있는 method/constructor access, access `Where` predicate, method reference, call graph, bytecode 분석
+- custom, dynamic, lambda를 포함한 helper-backed, unresolved 또는 그 밖의 미지원 sibling이 하나라도 포함된 condition tree
 
 ## 설정
 

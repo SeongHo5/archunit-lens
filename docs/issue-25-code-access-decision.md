@@ -2,16 +2,16 @@
 
 ## Decision
 
-**DEFER.** ArchUnit Lens keeps `callMethod(...)` and `accessField(...)` rules as Rule Overview metadata and does not register live warnings for method-body access yet.
+**SUPERSEDED FOR THE EXACT SUBSET.** Issue #49 implements resolved exact field access and zero-argument method calls for `noClasses()` rules. Parameterized calls, constructors, predicates, rule-side helper/custom lambdas, method references, call graphs, and bytecode analysis remain deferred.
 
-The current inspection visits declarations and references needed by the supported rule families. Adding a recursive body scan without a narrower proof would put resolution work on a hot editor path and could report calls or fields with the same name but a different owner. This change therefore adds no body visitor, call graph, data-flow analysis, cache, setting, or dependency.
+The inspection uses ordinary non-recursive Java PSI visitor callbacks and resolves only candidate member names from a complete supported rule. Issue #49 adds no explicit recursive body scan, call graph, data-flow analysis, cache, listener, setting, or dependency.
 
-## Smallest safe future shapes
+## Implemented exact shapes
 
-A later spike should start with exact resolved identities only:
+Issue #49 implements these resolved identities only:
 
 1. `System.out` and `System.err` when a `PsiReferenceExpression.resolve()` result is the exact `java.lang.System` field.
-2. An explicit `Throwable.printStackTrace()` call when `PsiMethodCallExpression.resolveMethod()` returns the exact zero-argument method on `java.lang.Throwable` or a resolved subtype.
+2. An explicit `Throwable.printStackTrace()` call when `PsiMethodCallExpression.resolveMethod()` proves the zero-argument signature and the symbolic receiver owner is exactly `java.lang.Throwable`. Inherited or overridden calls through a subtype owner do not match.
 
 Logger calls that accept a `Throwable` are a separate shape: overload resolution and argument position must be proven independently rather than inferred from a method name.
 
@@ -29,11 +29,11 @@ These constraints follow the IntelliJ Platform guidance for [inspections](https:
 
 ## False-positive boundary
 
-No warning may be based only on source text, an unresolved reference, a matching method/field name, a helper method, a lambda, or a custom ArchUnit condition. Resolution failure means no warning. A supported sibling must not be reported when another sibling changes the code-access rule's meaning and is unsupported.
+No warning may be based only on source text, an unresolved reference, a matching method/field name, a rule-side helper or lambda, or a custom ArchUnit condition. Resolution failure means no warning. A supported sibling must not be reported when another sibling changes the code-access rule's meaning and is unsupported. Ordinary accesses inside target-class lambda bodies remain part of the class-root inspection.
 
-## Evidence required to revisit
+## Evidence gate
 
-Reconsider `DEFER` only when a focused spike supplies all of the following:
+The original `DEFER` decision required a focused spike to supply all of the following:
 
 1. resolved positive and same-name/different-owner negative fixtures for each proposed shape;
 2. unresolved and dumb-mode fixtures proving zero warnings;
@@ -42,4 +42,4 @@ Reconsider `DEFER` only when a focused spike supplies all of the following:
 5. a fail-closed parser capability gate for the entire code-access rule, not a partial condition;
 6. IntelliJ platform auditor approval.
 
-Until then, parser and inspection regressions assert that `callMethod(...)` and `accessField(...)` remain metadata-only and produce no editor warning.
+Issue #49 satisfies this gate with parser/inspection identity fixtures, deterministic resolve-count checks, representative timing in [`issue-49-code-access-performance.md`](issue-49-code-access-performance.md), fail-closed sibling parsing, exact diagnostics, and IntelliJ Platform audit. Shapes outside that exact subset remain metadata-only.

@@ -24,6 +24,7 @@ internal enum class ExactHandlerFamily {
     INTERFACE_NAMING,
     CLASS_META_ANNOTATION,
     METHOD_META_ANNOTATION,
+    CODE_ACCESS,
 }
 
 internal sealed interface ExactHandlerDecision {
@@ -132,6 +133,7 @@ object ArchRuleParser {
             ExactHandlerFamily.INTERFACE_NAMING -> parseInterfaceNaming(source, calls)
             ExactHandlerFamily.CLASS_META_ANNOTATION -> parseClassMetaAnnotation(source, calls)
             ExactHandlerFamily.METHOD_META_ANNOTATION -> parseMethodMetaAnnotation(source, calls)
+            ExactHandlerFamily.CODE_ACCESS -> parseNoClassesCodeAccess(source, calls)
         }
         return rule?.let(ExactHandlerDecision::Matched)
             ?: ExactHandlerDecision.Unsupported(calls.unresolvedReason())
@@ -386,6 +388,49 @@ object ArchRuleParser {
         )
     }
 
+    private fun parseNoClassesCodeAccess(
+        source: ArchRuleSource,
+        calls: List<RawCall>,
+    ): NoClassesCodeAccessRule? {
+        if (calls.firstOrNull()?.name != "noClasses") return null
+        val shouldIndex = calls.indexOfFirst { it.name == "should" }
+        if (shouldIndex != 1 || calls.count { it.name == "should" } != 1) return null
+
+        val conditionCalls = calls.drop(shouldIndex + 1).withoutTrailingBecauseCall()
+        if (conditionCalls.isEmpty()) return null
+        var condition: ConditionExpr? = null
+        var expectsLeaf = true
+        conditionCalls.forEach { call ->
+            if (expectsLeaf) {
+                val leaf = call.exactCodeAccessLeaf() ?: return null
+                condition = condition?.let { ConditionExpr.Or(it, leaf) } ?: leaf
+                expectsLeaf = false
+            } else {
+                if (call.name != "orShould") return null
+                expectsLeaf = true
+            }
+        }
+        if (expectsLeaf) return null
+
+        return NoClassesCodeAccessRule(
+            ruleName = source.ruleName,
+            condition = condition ?: return null,
+            sourcePointer = source.fieldPointer,
+            analyzeScope = source.analyzeScope,
+            reason = calls.reason(),
+        )
+    }
+
+    private fun RawCall.exactCodeAccessLeaf(): ConditionExpr? {
+        val owner = (arguments.getOrNull(0) as? RawArgument.ClassLiteral)?.resolvedQualifiedName ?: return null
+        val memberName = (arguments.getOrNull(1) as? RawArgument.StringLiteral)?.value ?: return null
+        return when (name) {
+            "accessField" -> ConditionExpr.AccessField(owner, memberName)
+            "callMethod" -> ConditionExpr.CallMethod(owner, memberName, emptyList())
+            else -> null
+        }
+    }
+
     private fun ExactHandlerFamily.owns(calls: List<RawCall>): Boolean {
         val shouldIndex = calls.indexOfFirst { it.name == "should" }
         if (shouldIndex < 0) return false
@@ -416,13 +461,16 @@ object ArchRuleParser {
             ExactHandlerFamily.METHOD_META_ANNOTATION ->
                 predicateNames == listOf("methods", "that", "areDeclaredInClassesThat", "areInterfaces") &&
                     conditionNames == listOf("notBeMetaAnnotatedWith")
+            ExactHandlerFamily.CODE_ACCESS ->
+                predicateNames.firstOrNull() in setOf("classes", "noClasses") &&
+                    conditionNames.any { it == "accessField" || it == "callMethod" }
         }
     }
 
     private fun List<RawCall>.validateStaticArguments(): UnsupportedReason? {
         for (call in this) {
             val expectation = when (call.name) {
-                "classes", "noClasses", "methods", "that", "should", "andShould", "dependOnClassesThat",
+                "classes", "noClasses", "methods", "that", "should", "andShould", "orShould", "dependOnClassesThat",
                 "and", "or", "areInterfaces", "areNotInterfaces", "areEnums", "areNotEnums",
                 "beInterfaces", "notBeInterfaces", "beEnums", "notBeEnums", "areDeclaredInClassesThat",
                 -> ArgumentExpectation.None
@@ -433,6 +481,7 @@ object ArchRuleParser {
                 "notBeMetaAnnotatedWith", "beAssignableTo",
                 ->
                     ArgumentExpectation.Annotation
+                "accessField", "callMethod" -> ArgumentExpectation.ExactOwnerAndName
                 else -> continue
             }
             expectation.validate(call)?.let { return it }
@@ -481,6 +530,26 @@ object ArchRuleParser {
                     .filterIsInstance<RawArgument.ClassLiteral>()
                     .firstOrNull { it.resolvedQualifiedName == null }
                     ?.let { UnsupportedReason.UnresolvedSymbol(call.name, it.canonicalName) }
+            }
+        }
+
+        data object ExactOwnerAndName : ArgumentExpectation {
+            override fun validate(call: RawCall): UnsupportedReason? {
+                if (call.arguments.size != 2) {
+                    return UnsupportedReason.InvalidArity(call.name, "2", call.arguments.size)
+                }
+                val owner = call.arguments[0]
+                if (owner !is RawArgument.ClassLiteral) {
+                    return UnsupportedReason.UnsupportedArgument(call.name, owner.position, owner.kindName())
+                }
+                if (owner.resolvedQualifiedName == null) {
+                    return UnsupportedReason.UnresolvedSymbol(call.name, owner.canonicalName)
+                }
+                val name = call.arguments[1]
+                if (name !is RawArgument.StringLiteral) {
+                    return UnsupportedReason.UnsupportedArgument(call.name, name.position, name.kindName())
+                }
+                return null
             }
         }
     }
@@ -719,6 +788,15 @@ object ArchRuleParser {
             scope = analyzeScope,
             predicate = PredicateExpr.Leaf("areDeclaredInClassesThat.areInterfaces"),
             condition = ConditionExpr.Leaf("notBeMetaAnnotatedWith($forbiddenMetaAnnotationQualifiedName)"),
+            reason = reason,
+            supportStatus = SupportStatus.Supported,
+        )
+        is NoClassesCodeAccessRule -> RuleDescriptor(
+            subject = SubjectKind.Classes,
+            sourcePointer = sourcePointer,
+            scope = analyzeScope,
+            predicate = PredicateExpr.All,
+            condition = condition,
             reason = reason,
             supportStatus = SupportStatus.Supported,
         )
