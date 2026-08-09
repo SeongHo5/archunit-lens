@@ -1134,6 +1134,45 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         )
     }
 
+    fun testConstructorEntryPointArgumentsStayMetadataOnly() {
+        val file = configureJava(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.constructors;
+
+                class ArchitectureRules {
+                    static String dynamicPackage = "..util..";
+                    static String dynamicPackage() { return dynamicPackage; }
+
+                    @ArchTest static final ArchRule ordinary = constructors().that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule dynamic = constructors(dynamicPackage).that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule helper = constructors(dynamicPackage()).that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule literal = constructors("..util..").that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                }
+            """.trimIndent(),
+        )
+        val discoveries = ArchRuleSourceFinder.findInFile(file)
+            .mapNotNull(ArchRuleParser::discover)
+            .associateBy { it.ruleName }
+
+        assertTrue(discoveries.getValue("ordinary").liveRule is MemberConventionRule)
+        assertEquals(SupportStatus.Supported, discoveries.getValue("ordinary").descriptor.supportStatus)
+
+        listOf("dynamic", "helper", "literal").forEach { ruleName ->
+            val discovered = discoveries.getValue(ruleName)
+            assertNull(discovered.liveRule)
+            assertEquals(
+                SupportStatus.Unsupported(UnsupportedReason.InvalidArity("constructors", "0", 1)),
+                discovered.descriptor.supportStatus,
+            )
+        }
+    }
+
     fun testPositiveMemberConventionRejectsUnresolvedAndUnsupportedSiblingsAsWholeRule() {
         addMemberConventionStubs()
         val unsupportedRules = listOf(
