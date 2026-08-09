@@ -1460,6 +1460,39 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testConstructorEntryPointArgumentsProduceNoWarningsWhileOrdinaryConstructorRuleStillApplies() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.constructors;
+
+                class ArchitectureRules {
+                    static String dynamicPackage = "..util..";
+                    static String dynamicPackage() { return dynamicPackage; }
+
+                    @ArchTest static final ArchRule ordinary = constructors().that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule dynamic = constructors(dynamicPackage).that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule helper = constructors(dynamicPackage()).that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule literal = constructors("..util..").that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Utility.java",
+            "package com.example.util; class Utility { Utility() {} }",
+        )
+
+        assertEquals(
+            listOf("Utility"),
+            warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+    }
+
     private fun addPackageDependencyBanRule() {
         addArchitectureRulesFixture("packageDependencyBan")
     }

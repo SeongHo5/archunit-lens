@@ -465,7 +465,7 @@ object ArchRuleParser {
     private fun List<RawCall>.validateStaticArguments(): UnsupportedReason? {
         for (call in this) {
             val expectation = when (call.name) {
-                "classes", "noClasses", "methods", "that", "should", "andShould", "dependOnClassesThat",
+                "classes", "noClasses", "methods", "constructors", "that", "should", "andShould", "dependOnClassesThat",
                 "and", "or", "areInterfaces", "areNotInterfaces", "areEnums", "areNotEnums",
                 "beInterfaces", "notBeInterfaces", "beEnums", "notBeEnums", "areDeclaredInClassesThat",
                 "bePrivate", "beStatic",
