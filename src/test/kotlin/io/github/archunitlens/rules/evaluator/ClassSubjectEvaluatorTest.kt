@@ -384,13 +384,18 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
     fun testEvaluatesRecordModifierAndMetaAnnotationClassFacts() {
         addAnnotation("Transactional")
         addAnnotation("ComposedTransactional", "@com.example.Transactional")
+        addAnnotation("DeepComposedTransactional", "@com.example.ComposedTransactional")
         myFixture.addFileToProject(
             "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
             "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL }",
         )
+        val directlyAnnotatedClass = addJavaClass(
+            "src/test/java/com/example/DirectlyAnnotatedClass.java",
+            "package com.example; @com.example.Transactional public class DirectlyAnnotatedClass {}",
+        )
         val annotatedRecord = addJavaClass(
             "src/test/java/com/example/AnnotatedRecord.java",
-            "package com.example; @com.example.ComposedTransactional public record AnnotatedRecord() {}",
+            "package com.example; @com.example.DeepComposedTransactional public record AnnotatedRecord() {}",
         )
         val plainClass = addJavaClass(
             "src/test/java/com/example/PlainClass.java",
@@ -403,8 +408,20 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
 
         assertPredicate("areRecords()", annotatedRecord, "com.example", expected = true)
         assertPredicate("areRecords()", plainClass, "com.example", expected = false)
+        assertPredicate(
+            "areMetaAnnotatedWith(\"com.example.Transactional\")",
+            directlyAnnotatedClass,
+            "com.example",
+            expected = true,
+        )
         assertPredicate("areMetaAnnotatedWith(\"com.example.Transactional\")", annotatedRecord, "com.example", expected = true)
         assertPredicate("areMetaAnnotatedWith(\"com.example.Transactional\")", plainClass, "com.example", expected = false)
+        assertPredicate(
+            "areNotMetaAnnotatedWith(\"com.example.Transactional\")",
+            directlyAnnotatedClass,
+            "com.example",
+            expected = false,
+        )
         assertCondition("beRecords()", annotatedRecord, plainClass, ClassConditionViolation.MustBeRecord)
         assertCondition("notBeRecords()", plainClass, annotatedRecord, ClassConditionViolation.MustNotBeRecord)
         assertCondition(
@@ -424,6 +441,12 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
             annotatedRecord,
             plainClass,
             ClassConditionViolation.MissingMetaAnnotation("com.example.Transactional"),
+        )
+        assertCondition(
+            "notBeMetaAnnotatedWith(\"com.example.Transactional\")",
+            plainClass,
+            directlyAnnotatedClass,
+            ClassConditionViolation.ForbiddenMetaAnnotation("com.example.Transactional"),
         )
     }
 
