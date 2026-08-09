@@ -110,6 +110,7 @@ internal class StaticClassFactResolver(
     ): String? {
         PsiTreeUtil.findChildrenOfType(this, PsiReferenceExpression::class.java).forEach { reference ->
             if (
+                reference.referenceName != field.name ||
                 reference.resolve() != field ||
                 reference == allowedReference
             ) {

@@ -1106,6 +1106,30 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         }
     }
 
+    fun testAllowsStaticPackageArrayWithSameNamedSiblingField() {
+        val discovered = discoverSingleRule(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    static class NestedRules {
+                        private static final String[] PACKAGES = {"..util.."};
+                        @ArchTest static final ArchRule rule = classes().that()
+                                .resideInAnyPackage(PACKAGES).should().beRecords();
+                    }
+                    static class Sibling {
+                        private static final String[] PACKAGES = {"..other.."};
+                        static { PACKAGES[0] = "..changed.."; }
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
+        assertNotNull(discovered.liveRule)
+    }
+
     fun testUnresolvedMetaAnnotationAndUnsupportedSiblingStayMetadataOnly() {
         val unresolved = discoverSingleRule(
             classConventionRule(
