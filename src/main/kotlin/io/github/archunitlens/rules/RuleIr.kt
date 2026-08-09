@@ -81,7 +81,12 @@ sealed interface MemberConditionExpr {
 
     data class HaveModifier(val modifier: String, val required: Boolean) : MemberConditionExpr
     data class HaveName(val name: String, val required: Boolean) : MemberConditionExpr
-    data class HaveNameMatching(val pattern: String, val required: Boolean) : MemberConditionExpr
+    data class HaveNameMatching(
+        val pattern: String,
+        val required: Boolean,
+    ) : MemberConditionExpr {
+        internal val compiledPattern = Regex(pattern)
+    }
     data class And(val left: MemberConditionExpr, val right: MemberConditionExpr) : MemberConditionExpr
     data class Or(val left: MemberConditionExpr, val right: MemberConditionExpr) : MemberConditionExpr
 }

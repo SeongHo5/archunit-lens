@@ -131,7 +131,7 @@ internal object MemberSubjectEvaluator {
                 if (condition.required) MemberConditionViolation.RequiredName(condition.name) else MemberConditionViolation.ForbiddenName(condition.name),
             )
             is MemberConditionExpr.HaveNameMatching -> {
-                val matches = Regex(condition.pattern).matches(member.name ?: return null)
+                val matches = condition.compiledPattern.matches(member.name ?: return null)
                 conditionResult(
                     matches == condition.required,
                     if (condition.required) MemberConditionViolation.RequiredNamePattern(condition.pattern) else MemberConditionViolation.ForbiddenNamePattern(condition.pattern),
