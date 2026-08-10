@@ -7,6 +7,7 @@ import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.psi.JavaElementVisitor
+import com.intellij.psi.JavaResolveResult
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
@@ -1676,6 +1677,108 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertEquals(listOf("this", "super"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
     }
 
+    fun testSignatureAwareConstructorRulesIncludeImplicitDefaultConstructors() {
+        addSignatureCodeAccessStubs()
+        val constructorTargets = myFixture.addFileToProject(
+            "src/test/java/org/example/ImplicitParent.java",
+            """
+                package org.example;
+                public class ImplicitParent {}
+                class ImplicitChild extends ImplicitParent {
+                    ImplicitChild() { super(); }
+                    void create() { new ImplicitParent(); }
+                }
+            """.trimIndent(),
+        )
+        addArchitectureRules(
+            """
+                package com.example;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule implicit_default_constructor = noClasses().should()
+                            .callConstructor(org.example.ImplicitParent.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureFromExistingVirtualFile(constructorTargets.virtualFile)
+
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 2, warnings.size)
+        assertEquals(listOf("super", "ImplicitParent"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
+    fun testImplicitDefaultConstructorFallbackFailsClosedForInvalidCalls() {
+        addSignatureCodeAccessStubs()
+        myFixture.addFileToProject(
+            "src/test/java/org/example/ImplicitTarget.java",
+            "package org.example; public class ImplicitTarget {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/example/AbstractImplicit.java",
+            "package org.example; public abstract class AbstractImplicit {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/example/ExplicitTarget.java",
+            "package org.example; public class ExplicitTarget { public ExplicitTarget(java.lang.String value) {} }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/example/PackageTarget.java",
+            "package org.example; class PackageTarget {}",
+        )
+        addArchitectureRules(
+            """
+                package org.example;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule implicit_default_constructors = noClasses().should()
+                            .callConstructor(org.example.ImplicitTarget.class)
+                            .orShould().callConstructor(org.example.AbstractImplicit.class)
+                            .orShould().callConstructor(org.example.ExplicitTarget.class)
+                            .orShould().callConstructor(org.example.PackageTarget.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "InvalidImplicitCalls.java",
+            """
+                package com.example;
+                class InvalidImplicitCalls extends org.example.ImplicitTarget {
+                    InvalidImplicitCalls() { super("argument"); }
+                    void run() {
+                        new org.example.ImplicitTarget("argument");
+                        new org.example.AbstractImplicit();
+                        new org.example.ExplicitTarget();
+                        new org.example.PackageTarget();
+                        new missing.ImplicitTarget();
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        val liveRule = project.service<ArchRuleProjectService>()
+            .rulesForPackage("com.example")
+            .filterIsInstance<NoClassesCodeAccessRule>()
+            .single { it.ruleName == "implicit_default_constructors" }
+        assertEquals(4, liveRule.condition.testCodeAccessLeaves().size)
+        assertTrue(warningHighlights().isEmpty())
+
+        myFixture.configureByText(
+            "DumbImplicitCall.java",
+            "package com.example; class DumbImplicitCall { void run() { new org.example.ImplicitTarget(); } }",
+        )
+        DumbModeTestUtils.runInDumbModeSynchronously(project) {
+            val file = myFixture.file as PsiJavaFile
+            val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+            val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+            PsiTreeUtil.findChildrenOfType(file, PsiNewExpression::class.java).forEach(visitor::visitNewExpression)
+            assertTrue(holder.results.isEmpty())
+        }
+    }
+
     fun testExactCodeAccessIncludesAccessesInsideTargetClassLambdas() {
         addCodeAccessJdkStubs()
         addArchitectureRulesFixture("exactCodeAccess")
@@ -1776,6 +1879,7 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         var fieldResolves = 0
         var methodResolves = 0
         var constructorResolves = 0
+        var fallbackClassResolves = 0
 
         PsiTreeUtil.findChildrenOfType(file, PsiReferenceExpression::class.java).forEach { reference ->
             val counting = object : PsiReferenceExpression by reference {
@@ -1796,11 +1900,22 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
             visitor.visitMethodCallExpression(counting)
         }
         PsiTreeUtil.findChildrenOfType(file, PsiNewExpression::class.java).forEach { expression ->
+            val classReference = expression.classReference
+            val countingClassReference = classReference?.let { reference ->
+                object : PsiJavaCodeReferenceElement by reference {
+                    override fun advancedResolve(incompleteCode: Boolean): JavaResolveResult {
+                        fallbackClassResolves++
+                        return reference.advancedResolve(incompleteCode)
+                    }
+                }
+            }
             val counting = object : PsiNewExpression by expression {
                 override fun resolveConstructor(): PsiMethod? {
                     constructorResolves++
                     return expression.resolveConstructor()
                 }
+
+                override fun getClassReference(): PsiJavaCodeReferenceElement? = countingClassReference
             }
             visitor.visitNewExpression(counting)
         }
@@ -1810,6 +1925,72 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertEquals(referenceNames.toString(), 1, fieldResolves)
         assertEquals(methodNames.toString(), 1, methodResolves)
         assertEquals(1, constructorResolves)
+        assertEquals(0, fallbackClassResolves)
+    }
+
+    fun testImplicitDefaultConstructorFallbackAddsOneClassResolveOnlyAfterMissingMember() {
+        addSignatureCodeAccessStubs()
+        myFixture.addFileToProject(
+            "src/test/java/org/example/ImplicitTarget.java",
+            "package org.example; public class ImplicitTarget {}",
+        )
+        addArchitectureRules(
+            """
+                package com.example;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule implicit_default_constructor = noClasses().should()
+                            .callConstructor(org.example.ImplicitTarget.class);
+                }
+            """.trimIndent(),
+        )
+        val file = myFixture.configureByText(
+            "ImplicitResolveCounts.java",
+            """
+                package com.example;
+                class ImplicitResolveCounts {
+                    void run() {
+                        new org.example.ImplicitTarget();
+                        new java.lang.Object();
+                    }
+                }
+            """.trimIndent(),
+        ) as PsiJavaFile
+        val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+        val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+        assertTrue(
+            project.service<ArchRuleProjectService>()
+                .rulesForPackage(file.packageName)
+                .any { it.ruleName == "implicit_default_constructor" },
+        )
+        var constructorResolves = 0
+        var fallbackClassResolves = 0
+
+        PsiTreeUtil.findChildrenOfType(file, PsiNewExpression::class.java).forEach { expression ->
+            val classReference = expression.classReference
+            val countingClassReference = classReference?.let { reference ->
+                object : PsiJavaCodeReferenceElement by reference {
+                    override fun advancedResolve(incompleteCode: Boolean): JavaResolveResult {
+                        fallbackClassResolves++
+                        return reference.advancedResolve(incompleteCode)
+                    }
+                }
+            }
+            val counting = object : PsiNewExpression by expression {
+                override fun resolveConstructor(): PsiMethod? {
+                    constructorResolves++
+                    return expression.resolveConstructor()
+                }
+
+                override fun getClassReference(): PsiJavaCodeReferenceElement? = countingClassReference
+            }
+            visitor.visitNewExpression(counting)
+        }
+
+        assertEquals(1, constructorResolves)
+        assertEquals(1, fallbackClassResolves)
     }
 
     fun testCodeAccessPrefilterRepresentativeJavaBodyTiming() {

@@ -2,6 +2,7 @@ package io.github.archunitlens.rules.evaluator
 
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiEllipsisType
+import com.intellij.psi.PsiErrorElement
 import com.intellij.psi.PsiField
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiMethod
@@ -10,9 +11,12 @@ import com.intellij.psi.PsiModifier
 import com.intellij.psi.PsiNewExpression
 import com.intellij.psi.PsiReferenceExpression
 import com.intellij.psi.PsiType
+import com.intellij.psi.PsiTypeParameter
 import com.intellij.psi.util.InheritanceUtil
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.psi.util.PsiUtil
 import com.intellij.psi.util.TypeConversionUtil
+import com.intellij.util.JavaPsiConstructorUtil
 import io.github.archunitlens.rules.ConditionExpr
 
 internal data class ResolvedFieldAccess(
@@ -34,10 +38,12 @@ internal data class ResolvedConstructorCall(
 /**
  * Resolves prefiltered Java access candidates without retaining PSI.
  *
- * The resolved member proves name and signature identity. Its symbolic owner
- * remains the qualifier's JVM-erased static type, matching ArchUnit's access
- * target owner; inherited, overridden, and differently bounded generic
- * accesses therefore differ from the exact owner named by the rule.
+ * A resolved member normally proves name and signature identity. An implicit
+ * default constructor instead requires an accessible resolved class with no
+ * declared constructors. The symbolic owner remains the qualifier's
+ * JVM-erased static type, matching ArchUnit's access target owner; inherited,
+ * overridden, and differently bounded generic accesses therefore differ from
+ * the exact owner named by the rule.
  */
 internal object ExactCodeAccessEvaluator {
     fun resolveFieldAccess(reference: PsiReferenceExpression): ResolvedFieldAccess? {
@@ -68,15 +74,19 @@ internal object ExactCodeAccessEvaluator {
 
     fun resolveNewExpression(expression: PsiNewExpression): ResolvedConstructorCall? {
         if (expression.anonymousClass != null) return null
-        val constructor = expression.resolveConstructor() ?: return null
-        val ownerQualifiedName = expression.type?.erasureText() ?: return null
-        return ResolvedConstructorCall(ownerQualifiedName, constructor.rawParameterTypeQualifiedNames())
+        val constructor = expression.resolveConstructor()
+        if (constructor != null) {
+            val ownerQualifiedName = expression.type?.erasureText() ?: return null
+            return ResolvedConstructorCall(ownerQualifiedName, constructor.rawParameterTypeQualifiedNames())
+        }
+        return expression.resolveImplicitDefaultConstructor()
     }
 
     fun resolveExplicitConstructorCall(call: PsiMethodCallExpression): ResolvedConstructorCall? {
         val referenceName = call.methodExpression.referenceName
         if (referenceName != "this" && referenceName != "super") return null
-        val constructor = call.resolveMethod()?.takeIf(PsiMethod::isConstructor) ?: return null
+        val constructor = call.resolveMethod()?.takeIf(PsiMethod::isConstructor)
+        if (constructor == null) return call.resolveImplicitDefaultSuperConstructor(referenceName)
         val ownerQualifiedName = if (referenceName == "this") {
             PsiTreeUtil.getParentOfType(call, PsiClass::class.java)?.qualifiedName
         } else {
@@ -132,6 +142,61 @@ internal object ExactCodeAccessEvaluator {
             ?.qualifiedName
             ?.let { return it }
         return javaFile.packageName.takeIf(String::isNotEmpty)?.let { "$it.$qualifierName" }
+    }
+
+    private fun PsiNewExpression.resolveImplicitDefaultConstructor(): ResolvedConstructorCall? {
+        if (!hasEmptyCompleteArgumentList()) return null
+        val classResult = classReference?.advancedResolve(false) ?: return null
+        if (!classResult.isValidResult || !classResult.isAccessible) return null
+        val targetClass = classResult.element as? PsiClass ?: return null
+        if (!targetClass.hasImplicitDefaultConstructor() || !targetClass.canInstantiateAt(this)) return null
+        return ResolvedConstructorCall(targetClass.qualifiedName ?: return null, emptyList())
+    }
+
+    private fun PsiMethodCallExpression.resolveImplicitDefaultSuperConstructor(
+        referenceName: String,
+    ): ResolvedConstructorCall? {
+        if (referenceName != "super" || !hasEmptyCompleteArgumentList()) return null
+        val enclosingConstructor = PsiTreeUtil.getParentOfType(this, PsiMethod::class.java) ?: return null
+        if (!enclosingConstructor.isConstructor ||
+            JavaPsiConstructorUtil.findThisOrSuperCallInConstructor(enclosingConstructor) != this
+        ) {
+            return null
+        }
+        val sourceClass = enclosingConstructor.containingClass?.takeUnless { it.isEnum || it.isRecord } ?: return null
+        val targetClass = sourceClass.accessibleDirectSuperClass() ?: return null
+        if (!targetClass.hasImplicitDefaultConstructor()) return null
+        return ResolvedConstructorCall(targetClass.qualifiedName ?: return null, emptyList())
+    }
+
+    private fun com.intellij.psi.PsiCall.hasEmptyCompleteArgumentList(): Boolean {
+        if (PsiTreeUtil.findChildOfType(this, PsiErrorElement::class.java) != null) return false
+        return argumentList?.expressions?.isEmpty() == true
+    }
+
+    private fun PsiClass.hasImplicitDefaultConstructor(): Boolean = constructors.isEmpty() &&
+        this !is PsiTypeParameter &&
+        !isInterface &&
+        !isAnnotationType &&
+        !isEnum &&
+        !isRecord
+
+    private fun PsiClass.canInstantiateAt(expression: PsiNewExpression): Boolean {
+        if (hasModifierProperty(PsiModifier.ABSTRACT)) return false
+        if (!PsiUtil.isInnerClass(this)) return true
+        val enclosingClass = containingClass ?: return false
+        return expression.qualifier != null ||
+            InheritanceUtil.hasEnclosingInstanceInScope(enclosingClass, expression, false, false)
+    }
+
+    private fun PsiClass.accessibleDirectSuperClass(): PsiClass? {
+        val explicitSuperReferences = extendsList?.referenceElements.orEmpty()
+        if (explicitSuperReferences.isEmpty()) {
+            return superClass?.takeIf { it.qualifiedName == "java.lang.Object" }
+        }
+        val result = explicitSuperReferences.singleOrNull()?.advancedResolve(false) ?: return null
+        if (!result.isValidResult || !result.isAccessible) return null
+        return result.element as? PsiClass
     }
 
     private fun PsiMethod.rawParameterTypeQualifiedNames(): List<String> = parameterList.parameters.map { parameter ->
