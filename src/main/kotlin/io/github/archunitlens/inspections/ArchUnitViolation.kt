@@ -8,6 +8,7 @@ import io.github.archunitlens.inspections.quickfix.GoToArchRuleQuickFix
 import io.github.archunitlens.inspections.quickfix.RemoveAnnotationQuickFix
 import io.github.archunitlens.rules.LiveArchRule
 import io.github.archunitlens.rules.evaluator.ClassConditionViolation
+import io.github.archunitlens.rules.evaluator.MemberConditionViolation
 
 /**
  * Semantic reason why a supported ArchUnit rule was violated.
@@ -48,6 +49,11 @@ internal sealed interface ArchUnitViolation {
         override val rule: LiveArchRule,
         val detail: ClassConditionViolation,
     ) : ArchUnitViolation
+
+    data class MemberConvention(
+        override val rule: LiveArchRule,
+        val detail: MemberConditionViolation,
+    ) : ArchUnitViolation
 }
 
 /**
@@ -66,6 +72,7 @@ internal fun ArchUnitViolation.quickFixes(): Array<LocalQuickFix> = when (this) 
     is ArchUnitViolation.MissingInterface -> navigationFixes()
     is ArchUnitViolation.MissingAssignableType -> navigationFixes()
     is ArchUnitViolation.ClassConvention -> navigationFixes()
+    is ArchUnitViolation.MemberConvention -> navigationFixes()
 }
 
 @InspectionMessage
@@ -87,7 +94,17 @@ private fun ArchUnitViolation.detailMessage(): String? = when (this) {
         forbiddenPackagePattern,
     )
     is ArchUnitViolation.ClassConvention -> detail.message()
+    is ArchUnitViolation.MemberConvention -> detail.message()
     else -> null
+}
+
+private fun MemberConditionViolation.message(): String = when (this) {
+    MemberConditionViolation.MustBePrivate -> ArchUnitLensBundle.message("inspection.problem.member.mustBePrivate")
+    MemberConditionViolation.MustBeStatic -> ArchUnitLensBundle.message("inspection.problem.member.mustBeStatic")
+    is MemberConditionViolation.WrongRawReturnType -> ArchUnitLensBundle.message(
+        "inspection.problem.member.rawReturnType",
+        qualifiedName,
+    )
 }
 
 private fun ClassConditionViolation.message(): String = when (this) {

@@ -24,10 +24,13 @@ import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
 import io.github.archunitlens.rules.InterfaceNamingRule
 import io.github.archunitlens.rules.LiveArchRule
+import io.github.archunitlens.rules.MemberConventionRule
+import io.github.archunitlens.rules.MemberSubjectKind
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 import io.github.archunitlens.rules.PredicateExpr
 import io.github.archunitlens.rules.evaluator.ClassSubjectEvaluator
+import io.github.archunitlens.rules.evaluator.MemberSubjectEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import io.github.archunitlens.settings.ArchUnitLensSettingsState
 
@@ -69,6 +72,7 @@ class ArchUnitLensInspection : LocalInspectionTool() {
         val interfaceNamingRules = rules.filterIsInstance<InterfaceNamingRule>()
         val classMetaAnnotationRules = rules.filterIsInstance<ClassMetaAnnotationRule>()
         val methodMetaAnnotationRules = rules.filterIsInstance<MethodMetaAnnotationRule>()
+        val memberConventionRules = rules.filterIsInstance<MemberConventionRule>()
         val classConventionRules = rules.filterIsInstance<ClassConventionRule>()
             .filterNot { rule -> DumbService.isDumb(holder.project) && rule.suppressDuringDumbMode }
 
@@ -161,6 +165,22 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                             *violation.quickFixes(),
                         )
                     }
+                if (!DumbService.isDumb(holder.project)) {
+                    memberConventionRules
+                        .filter { it.subject == MemberSubjectKind.Constructors }
+                        .filter { aClass.hasImplicitOrdinaryConstructor() }
+                        .filter { MemberSubjectEvaluator.matchesImplicitConstructor(it, aClass, packageName) }
+                        .forEach { rule ->
+                            MemberSubjectEvaluator.implicitConstructorViolations(rule, aClass).forEach { detail ->
+                                val violation = ArchUnitViolation.MemberConvention(rule, detail)
+                                holder.registerProblem(
+                                    nameIdentifier,
+                                    violation.problemMessage(),
+                                    *violation.quickFixes(),
+                                )
+                            }
+                        }
+                }
                 interfaceNamingRules
                     .filter {
                         aClass.isInterface &&
@@ -215,6 +235,35 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             }
 
             override fun visitMethod(method: PsiMethod) {
+                if (!DumbService.isDumb(holder.project) && !method.isConstructor) {
+                    memberConventionRules
+                        .filter { it.subject == MemberSubjectKind.Methods }
+                        .filter { MemberSubjectEvaluator.matches(it, method, packageName) }
+                        .forEach { rule ->
+                            MemberSubjectEvaluator.violations(rule, method).forEach { detail ->
+                                val violation = ArchUnitViolation.MemberConvention(rule, detail)
+                                holder.registerProblem(
+                                    method.nameIdentifier ?: method,
+                                    violation.problemMessage(),
+                                    *violation.quickFixes(),
+                                )
+                            }
+                        }
+                } else if (!DumbService.isDumb(holder.project)) {
+                    memberConventionRules
+                        .filter { it.subject == MemberSubjectKind.Constructors }
+                        .filter { MemberSubjectEvaluator.matches(it, method, packageName) }
+                        .forEach { rule ->
+                            MemberSubjectEvaluator.violations(rule, method).forEach { detail ->
+                                val violation = ArchUnitViolation.MemberConvention(rule, detail)
+                                holder.registerProblem(
+                                    method.nameIdentifier ?: method,
+                                    violation.problemMessage(),
+                                    *violation.quickFixes(),
+                                )
+                            }
+                        }
+                }
                 if (method.containingClass?.isInterface != true) return
                 method.modifierList.annotations.forEach { annotation ->
                     val annotationName = annotation.qualifiedName ?: return@forEach
@@ -234,6 +283,15 @@ class ArchUnitLensInspection : LocalInspectionTool() {
     }
 }
 
+private fun PsiClass.hasImplicitOrdinaryConstructor(): Boolean = nameIdentifier != null &&
+    qualifiedName != null &&
+    constructors.isEmpty() &&
+    !isInterface &&
+    !isAnnotationType &&
+    !isEnum &&
+    !isRecord &&
+    PsiTreeUtil.getParentOfType(this, PsiMethod::class.java) == null
+
 private data class ForbiddenDependencyMatch(
     val rule: PackageDependencyBanRule,
     val targetQualifiedName: String,
@@ -252,6 +310,7 @@ private fun LiveArchRule.isEnabledBy(
     is ClassMetaAnnotationRule,
     is MethodMetaAnnotationRule,
     -> settings.annotationRulesEnabled
+    is MemberConventionRule -> settings.memberDeclarationRulesEnabled
     is InterfaceNamingRule -> settings.interfaceRulesEnabled
 }
 

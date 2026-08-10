@@ -54,6 +54,7 @@ The initial live-warning subset includes:
 - left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
 - literal class and method meta-annotation rules, including direct and transitively composed annotations
+- positive method and constructor declaration conventions over supported declaring-class facts: private utility constructors, static utility methods, and exact resolved raw return types
 - `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
 
 ## Rule Overview
@@ -78,8 +79,7 @@ ArchUnit Lens does not execute ArchUnit rules or user/project code. It intention
 - Kotlin ArchUnit rule parsing or Kotlin target-source inspection
 - unused wildcard import statements without a resolved referenced class
 - unresolved dependency references; resolve failures intentionally produce no warning
-- arbitrary method/member subject rules beyond the literal meta-annotation subset
-- method/constructor declaration conventions tracked by issue #24
+- arbitrary method/member subject rules beyond the supported positive declaration and literal meta-annotation subsets
 - body-level `callMethod(...)` and `accessField(...)` checks; the current decision is documented in [`docs/issue-25-code-access-decision.md`](docs/issue-25-code-access-decision.md)
 - condition `orShould()` and any boolean tree containing a custom, dynamic, helper-backed, or unresolved leaf
 

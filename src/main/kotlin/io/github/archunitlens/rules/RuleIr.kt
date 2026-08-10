@@ -54,6 +54,39 @@ sealed interface ConditionExpr {
 }
 
 /**
+ * Statically evaluable selector facts for positive method and constructor subjects.
+ */
+sealed interface MemberPredicateExpr {
+    data object All : MemberPredicateExpr
+    data class IsAnnotatedWith(
+        val qualifiedName: String,
+        val metaAnnotated: Boolean,
+    ) : MemberPredicateExpr
+
+    data class DeclaredInClasses(val predicate: PredicateExpr) : MemberPredicateExpr
+    data class And(val left: MemberPredicateExpr, val right: MemberPredicateExpr) : MemberPredicateExpr
+    data class Or(val left: MemberPredicateExpr, val right: MemberPredicateExpr) : MemberPredicateExpr
+}
+
+/**
+ * Statically evaluable declaration conditions for positive member subjects.
+ */
+sealed interface MemberConditionExpr {
+    data object BePrivate : MemberConditionExpr
+    data object BeStatic : MemberConditionExpr
+    data class HaveRawReturnType(val qualifiedName: String) : MemberConditionExpr
+    data class And(val left: MemberConditionExpr, val right: MemberConditionExpr) : MemberConditionExpr
+}
+
+/**
+ * Positive declaration subjects that can be evaluated without visiting method bodies.
+ */
+sealed interface MemberSubjectKind {
+    data object Methods : MemberSubjectKind
+    data object Constructors : MemberSubjectKind
+}
+
+/**
  * Class-level ArchUnit modifier facts that Java PSI can prove without loading
  * bytecode-only metadata or interpreting user code.
  */

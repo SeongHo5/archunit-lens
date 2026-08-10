@@ -823,6 +823,30 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testLiteralMethodMetaAnnotationRuleKeepsAnnotationRangeAndRemovalQuickFix() {
+        addArchitectureRulesFixture("literalMethodMetaAnnotation")
+        addProxyAnnotationStubs()
+        myFixture.configureByText(
+            "RemoteGateway.java",
+            """
+                package com.example.api;
+
+                interface RemoteGateway {
+                    @com.example.Proxy
+                    void execute();
+                }
+            """.trimIndent(),
+        )
+
+        val warning = warningHighlights().single()
+        assertEquals("@com.example.Proxy", myFixture.file.text.substring(warning.startOffset, warning.endOffset))
+        val fixes = myFixture.getAllQuickFixes()
+        assertTrue(
+            fixes.map { it.text }.toString(),
+            fixes.any { it.text.contains(removeAnnotationFixText("Proxy")) },
+        )
+    }
+
     fun testCustomMetaAnnotationHelperRemainsUnsupportedWithoutWarning() {
         addArchitectureRulesFixture("unsupportedCustomPredicate")
         addProxyAnnotationStubs()
@@ -1378,11 +1402,234 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         }
     }
 
+    fun testMethodAndConstructorDeclarationConventionsHighlightExplicitAndImplicitUtilityDeclarations() {
+        addMemberConventionStubs()
+        addArchitectureRulesFixture("methodConstructorConventions")
+        myFixture.configureByText(
+            "UtilityClasses.java",
+            """
+                package com.example.util;
+
+                class PrivateUtility {
+                    private PrivateUtility() {}
+                    static void good() {}
+                }
+
+                class ExplicitUtility {
+                    ExplicitUtility() {}
+                    void bad() {}
+                }
+
+                class ImplicitUtility {
+                    static void good() {}
+                }
+
+                class Container {
+                    private Container() {}
+
+                    private static class HiddenUtility {
+                        static void good() {}
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        val warnings = warningHighlights()
+        assertEquals(3, warnings.size)
+        assertEquals(
+            listOf("ExplicitUtility", "bad", "ImplicitUtility"),
+            warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+        assertTrue(warnings[0].description.orEmpty().contains(ArchUnitLensBundle.message("inspection.problem.member.mustBePrivate")))
+        assertTrue(warnings[1].description.orEmpty().contains(ArchUnitLensBundle.message("inspection.problem.member.mustBeStatic")))
+        assertTrue(warnings[2].description.orEmpty().contains(ArchUnitLensBundle.message("inspection.problem.member.mustBePrivate")))
+    }
+
+    fun testControllerMethodConventionUsesDirectAndTransitiveMetaAnnotationsAndRawReturnTypes() {
+        addMemberConventionStubs()
+        addArchitectureRulesFixture("methodConstructorConventions")
+        myFixture.configureByText(
+            "OrderController.java",
+            """
+                package com.example.api;
+
+                @com.example.RestController
+                class OrderController {
+                    @com.example.RequestMapping com.example.ResponseEntity<String> direct() { return null; }
+                    @com.example.GetMapping com.example.ResponseEntity<String> composed() { return null; }
+                    @com.example.GetMapping com.example.WrongResponse mismatch() { return null; }
+                    @com.example.GetMapping void noContent() {}
+                    @com.example.GetMapping int status() { return 200; }
+                    @com.example.GetMapping String[] array() { return null; }
+                    @com.example.GetMapping com.other.ResponseEntity<String> sameSimpleName() { return null; }
+                }
+            """.trimIndent(),
+        )
+
+        val warnings = warningHighlights()
+        assertEquals(5, warnings.size)
+        assertEquals(
+            listOf("mismatch", "noContent", "status", "array", "sameSimpleName"),
+            warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+        assertTrue(
+            warnings.all {
+                it.description.orEmpty().contains(
+                    ArchUnitLensBundle.message("inspection.problem.member.rawReturnType", "com.example.ResponseEntity"),
+                )
+            },
+        )
+    }
+
+    fun testMemberConventionSkipsUnresolvedRuleTargetsAndCandidateAnnotationOrReturnTypes() {
+        addMemberConventionStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule unresolved_target = methods().that()
+                            .areMetaAnnotatedWith(com.example.RequestMapping.class)
+                            .should().haveRawReturnType(com.example.MissingResponse.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "UnresolvedController.java",
+            """
+                package com.example.api;
+
+                @com.example.RestController
+                class UnresolvedController {
+                    @com.example.missing.RequestMapping com.example.missing.ResponseEntity unresolved() { return null; }
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testUnresolvedCandidateMetaAnnotationMakesOrPredicateFailClosed() {
+        addMemberConventionStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import com.example.RequestMapping;
+                import com.example.RestController;
+                import com.example.ResponseEntity;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
+
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule unresolved_candidate = methods().that()
+                            .areMetaAnnotatedWith(RequestMapping.class)
+                            .or().areDeclaredInClassesThat().areAnnotatedWith(RestController.class)
+                            .should().haveRawReturnType(ResponseEntity.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "UnresolvedController.java",
+            """
+                package com.example.api;
+
+                @com.example.RestController
+                class UnresolvedController {
+                    @com.example.missing.RequestMapping String unresolved() { return ""; }
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testMemberConventionDoesNotRegisterWarningsDuringDumbMode() {
+        addMemberConventionStubs()
+        addArchitectureRulesFixture("methodConstructorConventions")
+        addControllerSuffixRule("SuffixRules.java")
+        myFixture.configureByText(
+            "Utility.java",
+            "package com.example.util.controller; class Utility { void notStatic() {} }",
+        )
+        assertEquals(3, warningDescriptions().size)
+
+        DumbModeTestUtils.runInDumbModeSynchronously(project) {
+            val file = myFixture.file as PsiJavaFile
+            val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+            val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+            val utilityClass = file.classes.single()
+            visitor.visitClass(utilityClass)
+            utilityClass.methods.forEach(visitor::visitMethod)
+
+            assertEquals(1, holder.results.size)
+            assertTrue(holder.results.single().descriptionTemplate.contains("controller_classes_should_end_with_controller"))
+        }
+    }
+
+    fun testUnsupportedMemberConventionSiblingProducesNoWarning() {
+        addMemberConventionStubs()
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
+
+                class ArchitectureRules {
+                    static String dynamicPackage = "..util..";
+                    @ArchTest static final ArchRule dynamic = methods().that()
+                            .areDeclaredInClassesThat().resideInAPackage(dynamicPackage)
+                            .should().beStatic();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Utility.java",
+            "package com.example.util; class Utility { void notStatic() {} }",
+        )
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testConstructorEntryPointArgumentsProduceNoWarningsWhileOrdinaryConstructorRuleStillApplies() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.constructors;
+
+                class ArchitectureRules {
+                    static String dynamicPackage = "..util..";
+                    static String dynamicPackage() { return dynamicPackage; }
+
+                    @ArchTest static final ArchRule ordinary = constructors().that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule dynamic = constructors(dynamicPackage).that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule helper = constructors(dynamicPackage()).that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                    @ArchTest static final ArchRule literal = constructors("..util..").that()
+                            .areDeclaredInClassesThat().resideInAPackage("..util..").should().bePrivate();
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureByText(
+            "Utility.java",
+            "package com.example.util; class Utility { Utility() {} }",
+        )
+
+        assertEquals(
+            listOf("Utility"),
+            warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+    }
+
     private fun addPackageDependencyBanRule() {
         addArchitectureRulesFixture("packageDependencyBan")
     }
 
-    private fun addControllerSuffixRule() {
+    private fun addControllerSuffixRule(fileName: String = "ArchitectureRules.java") {
         addArchitectureRules(
             """
                 import com.tngtech.archunit.junit.ArchTest;
@@ -1396,6 +1643,7 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
                                     .should().haveSimpleNameEndingWith("Controller");
                 }
             """.trimIndent(),
+            fileName,
         )
     }
 
@@ -1436,8 +1684,11 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         )
     }
 
-    private fun addArchitectureRules(code: String) {
-        myFixture.addFileToProject("src/test/java/com/example/ArchitectureRules.java", code)
+    private fun addArchitectureRules(
+        code: String,
+        fileName: String = "ArchitectureRules.java",
+    ) {
+        myFixture.addFileToProject("src/test/java/com/example/$fileName", code)
     }
 
     private fun addArchitectureRulesFixture(name: String) {
@@ -1508,6 +1759,24 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         addAnnotationStub("CyclicUnrelatedA", "@com.example.CyclicUnrelatedB")
         addAnnotationStub("CyclicUnrelatedB", "@com.example.CyclicUnrelatedA")
         addAnnotationStub("Unrelated")
+    }
+
+    private fun addMemberConventionStubs() {
+        addAnnotationStub("RequestMapping")
+        addAnnotationStub("GetMapping", "@com.example.RequestMapping")
+        addAnnotationStub("RestController")
+        myFixture.addFileToProject(
+            "src/test/java/com/example/ResponseEntity.java",
+            "package com.example; public class ResponseEntity<T> {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/WrongResponse.java",
+            "package com.example; public class WrongResponse {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/other/ResponseEntity.java",
+            "package com.other; public class ResponseEntity<T> {}",
+        )
     }
 
     private fun addAnnotationStub(

@@ -54,6 +54,7 @@ ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live wa
 - 모든 leaf가 정적으로 지원될 때 left-associative class predicate `and()` / `or()`와 독립적인 `andShould()` condition
 - `beAssignableTo(...)` 대상이 resolve되는 QueryMapper 형태 interface rule
 - direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule
+- 지원되는 declaring-class fact 기반 positive method/constructor declaration convention: private utility constructor, static utility method, exact resolved raw return type
 - `@AnalyzeClasses(packages = ...)` scope와 `.because("...")` reason 표시
 
 ## Rule Overview
@@ -78,8 +79,7 @@ ArchUnit Lens는 ArchUnit rule이나 사용자/프로젝트 코드를 실행하�
 - Kotlin ArchUnit rule parsing 또는 Kotlin target-source inspection
 - resolved referenced class가 없는 unused wildcard import statement
 - resolve되지 않는 dependency reference. resolve 실패는 의도적으로 warning을 만들지 않습니다.
-- literal meta-annotation subset 밖의 임의 method/member subject rule
-- issue #24로 추적하는 method/constructor declaration convention
+- 지원되는 positive declaration 및 literal meta-annotation subset 밖의 임의 method/member subject rule
 - body-level `callMethod(...)`, `accessField(...)` 검사. 현재 결정은 [`docs/issue-25-code-access-decision.md`](docs/issue-25-code-access-decision.md)에 기록되어 있습니다.
 - condition `orShould()` 또는 custom, dynamic, helper-backed, unresolved leaf가 하나라도 포함된 boolean tree
 

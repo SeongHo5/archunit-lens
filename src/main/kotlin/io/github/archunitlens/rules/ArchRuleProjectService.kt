@@ -371,10 +371,11 @@ private const val NANOS_PER_MILLISECOND = 1_000_000
 
 private fun PsiJavaFile.textHashStamp(): Int = text.hashCode()
 
-private fun PsiJavaFile.requiresTypeResolution(): Boolean = PsiTreeUtil
-    .findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null ||
-    PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
-        .any { call ->
+private fun PsiJavaFile.requiresTypeResolution(): Boolean {
+    if (PsiTreeUtil.findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null) return true
+    val methodCalls = PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
+    if (
+        methodCalls.any { call ->
             call.methodExpression.referenceName in setOf(
                 "beAssignableTo",
                 "areMetaAnnotatedWith",
@@ -390,6 +391,20 @@ private fun PsiJavaFile.requiresTypeResolution(): Boolean = PsiTreeUtil
                             ?.let { it !is PsiLiteralExpression } == true
                     )
         }
+    ) {
+        return true
+    }
+    val hasMemberEntryPoint = methodCalls.any { it.methodExpression.referenceName in setOf("methods", "constructors") }
+    return hasMemberEntryPoint &&
+        methodCalls.any {
+            it.methodExpression.referenceName in setOf(
+                "areAnnotatedWith",
+                "areNotAnnotatedWith",
+                "areMetaAnnotatedWith",
+                "haveRawReturnType",
+            )
+        }
+}
 
 private fun DiscoveredArchRule.appliesToPackage(packageName: String): Boolean = liveRule?.appliesToPackage(packageName)
     ?: descriptor.scope.includes(packageName)
@@ -404,5 +419,6 @@ private fun LiveArchRule.appliesToPackage(packageName: String): Boolean = analyz
         is InterfaceNamingRule,
         is ClassMetaAnnotationRule,
         is MethodMetaAnnotationRule,
+        is MemberConventionRule,
         -> true
     }
