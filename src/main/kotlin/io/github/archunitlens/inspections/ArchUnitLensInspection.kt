@@ -30,6 +30,7 @@ import io.github.archunitlens.rules.MemberSubjectKind
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 import io.github.archunitlens.rules.PredicateExpr
+import io.github.archunitlens.rules.evaluator.ClassPredicateEvaluationCache
 import io.github.archunitlens.rules.evaluator.ClassSubjectEvaluator
 import io.github.archunitlens.rules.evaluator.MemberSubjectEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
@@ -75,6 +76,7 @@ class ArchUnitLensInspection : LocalInspectionTool() {
         val methodMetaAnnotationRules = rules.filterIsInstance<MethodMetaAnnotationRule>()
         val memberConventionRules = rules.filterIsInstance<MemberConventionRule>()
         val classConventionRules = rules.filterIsInstance<ClassConventionRule>()
+        val memberClassPredicateCache = ClassPredicateEvaluationCache()
 
         return object : JavaElementVisitor() {
             override fun visitImportStatement(statement: PsiImportStatement) {
@@ -169,7 +171,14 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                     memberConventionRules
                         .filter { it.subject == MemberSubjectKind.Constructors }
                         .filter { aClass.hasImplicitOrdinaryConstructor() }
-                        .filter { MemberSubjectEvaluator.matchesImplicitConstructor(it, aClass, packageName) }
+                        .filter {
+                            MemberSubjectEvaluator.matchesImplicitConstructor(
+                                it,
+                                aClass,
+                                packageName,
+                                memberClassPredicateCache::evaluate,
+                            )
+                        }
                         .forEach { rule ->
                             MemberSubjectEvaluator.implicitConstructorViolations(rule, aClass).forEach { detail ->
                                 val violation = ArchUnitViolation.MemberConvention(rule, detail)
@@ -238,7 +247,14 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                 if (!DumbService.isDumb(holder.project) && !method.isConstructor) {
                     memberConventionRules
                         .filter { it.subject == MemberSubjectKind.Methods }
-                        .filter { MemberSubjectEvaluator.matches(it, method, packageName) }
+                        .filter {
+                            MemberSubjectEvaluator.matches(
+                                it,
+                                method,
+                                packageName,
+                                memberClassPredicateCache::evaluate,
+                            )
+                        }
                         .forEach { rule ->
                             MemberSubjectEvaluator.violations(rule, method).forEach { detail ->
                                 val violation = ArchUnitViolation.MemberConvention(rule, detail)
@@ -252,7 +268,14 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                 } else if (!DumbService.isDumb(holder.project)) {
                     memberConventionRules
                         .filter { it.subject == MemberSubjectKind.Constructors }
-                        .filter { MemberSubjectEvaluator.matches(it, method, packageName) }
+                        .filter {
+                            MemberSubjectEvaluator.matches(
+                                it,
+                                method,
+                                packageName,
+                                memberClassPredicateCache::evaluate,
+                            )
+                        }
                         .forEach { rule ->
                             MemberSubjectEvaluator.violations(rule, method).forEach { detail ->
                                 val violation = ArchUnitViolation.MemberConvention(rule, detail)
@@ -284,7 +307,14 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                 if (DumbService.isDumb(holder.project)) return
                 memberConventionRules
                     .filter { it.subject == MemberSubjectKind.Fields }
-                    .filter { MemberSubjectEvaluator.matches(it, field, packageName) }
+                    .filter {
+                        MemberSubjectEvaluator.matches(
+                            it,
+                            field,
+                            packageName,
+                            memberClassPredicateCache::evaluate,
+                        )
+                    }
                     .forEach { rule ->
                         MemberSubjectEvaluator.violations(rule, field).forEach { detail ->
                             val violation = ArchUnitViolation.MemberConvention(rule, detail)

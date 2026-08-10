@@ -11,6 +11,7 @@ import io.github.archunitlens.rules.ClassConventionRule
 import io.github.archunitlens.rules.ClassMetaAnnotationRule
 import io.github.archunitlens.rules.ClassNameSuffixRule
 import io.github.archunitlens.rules.InterfaceNamingRule
+import io.github.archunitlens.rules.MemberConventionRule
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 
@@ -224,6 +225,47 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
             assertPredicate(case.expression, case.matchingClass, case.matchingPackage, expected = true)
             assertPredicate(case.expression, case.excludedClass, case.excludedPackage, expected = false)
         }
+    }
+
+    fun testMemberCountDoesNotMultiplyDeclaringClassHierarchyEvaluation() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/QueryModel.java",
+            "package com.example; public interface QueryModel {}",
+        )
+        val rule = parseRule<MemberConventionRule>(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_query_methods = noMethods().that()
+                            .areDeclaredInClassesThat().implement(com.example.QueryModel.class)
+                            .should().bePublic();
+                }
+            """.trimIndent(),
+        )
+        val candidate = addJavaClass(
+            "src/test/java/com/example/Query.java",
+            """
+                package com.example;
+                class Query implements com.example.QueryModel {
+                    void first() {}
+                    void second() {}
+                    void third() {}
+                }
+            """.trimIndent(),
+        )
+        var hierarchyEvaluationCount = 0
+        val cache = ClassPredicateEvaluationCache { aClass, packageName, predicate ->
+            hierarchyEvaluationCount += 1
+            ClassSubjectEvaluator.matchesPredicate(aClass, packageName, predicate)
+        }
+
+        val matches = candidate.methods.map {
+            it.name to MemberSubjectEvaluator.matches(rule, it, "com.example", cache::evaluate)
+        }
+        assertTrue("rule=$rule matches=$matches", matches.all { it.second })
+        assertEquals(1, hierarchyEvaluationCount)
     }
 
     fun testEvaluatesAndShouldViolationsIndependentlyInSourceOrder() {

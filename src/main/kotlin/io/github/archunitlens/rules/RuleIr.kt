@@ -100,6 +100,11 @@ sealed interface MemberSubjectKind {
     data object Constructors : MemberSubjectKind
 }
 
+/**
+ * Determines whether a supported rule requires or forbids declarations that satisfy its condition.
+ * [POSITIVE] reports selected declarations whose condition is not satisfied; [NEGATIVE] reports
+ * selected declarations whose condition is satisfied.
+ */
 enum class RulePolarity {
     POSITIVE,
     NEGATIVE,

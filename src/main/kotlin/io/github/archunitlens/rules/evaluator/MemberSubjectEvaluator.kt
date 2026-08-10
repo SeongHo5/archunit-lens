@@ -13,7 +13,9 @@ import io.github.archunitlens.rules.MemberConditionExpr
 import io.github.archunitlens.rules.MemberConventionRule
 import io.github.archunitlens.rules.MemberPredicateExpr
 import io.github.archunitlens.rules.MemberSubjectKind
+import io.github.archunitlens.rules.PredicateExpr
 import io.github.archunitlens.rules.RulePolarity
+import java.util.IdentityHashMap
 
 internal sealed interface MemberConditionViolation {
     data object MustBePrivate : MemberConditionViolation
@@ -30,11 +32,40 @@ internal sealed interface MemberConditionViolation {
     data class ForbiddenCondition(val description: String) : MemberConditionViolation
 }
 
+internal typealias ClassPredicateEvaluator = (PsiClass, String, PredicateExpr) -> Boolean?
+
+/**
+ * Memoizes declaring-class predicates for one inspection visitor. Instances must not outlive that
+ * visitor because the keys are raw PSI classes.
+ */
+internal class ClassPredicateEvaluationCache(
+    private val evaluator: ClassPredicateEvaluator = ClassSubjectEvaluator::matchesPredicate,
+) {
+    private val results = IdentityHashMap<PsiClass, MutableMap<ClassPredicateKey, Boolean?>>()
+
+    fun evaluate(aClass: PsiClass, packageName: String, predicate: PredicateExpr): Boolean? {
+        val classResults = results.getOrPut(aClass, ::mutableMapOf)
+        val key = ClassPredicateKey(packageName, predicate)
+        if (classResults.containsKey(key)) return classResults[key]
+
+        return evaluator(aClass, packageName, predicate).also { classResults[key] = it }
+    }
+
+    private data class ClassPredicateKey(val packageName: String, val predicate: PredicateExpr)
+}
+
 /** Evaluates declaration PSI only and fails closed whenever a required symbol cannot be resolved. */
 internal object MemberSubjectEvaluator {
-    fun matches(rule: MemberConventionRule, member: PsiMember, packageName: String): Boolean = rule.analyzeScope.includes(packageName) &&
+    fun matches(rule: MemberConventionRule, member: PsiMember, packageName: String): Boolean = matches(rule, member, packageName, ClassSubjectEvaluator::matchesPredicate)
+
+    fun matches(
+        rule: MemberConventionRule,
+        member: PsiMember,
+        packageName: String,
+        classPredicateEvaluator: ClassPredicateEvaluator,
+    ): Boolean = rule.analyzeScope.includes(packageName) &&
         subjectMatches(rule.subject, member) &&
-        evaluatePredicate(member, packageName, rule.predicate) == true
+        evaluatePredicate(member, packageName, rule.predicate, classPredicateEvaluator) == true
 
     fun violations(rule: MemberConventionRule, member: PsiMember): List<MemberConditionViolation> {
         val result = evaluateCondition(member, rule.condition) ?: return emptyList()
@@ -48,9 +79,20 @@ internal object MemberSubjectEvaluator {
         }
     }
 
-    fun matchesImplicitConstructor(rule: MemberConventionRule, aClass: PsiClass, packageName: String): Boolean = rule.subject == MemberSubjectKind.Constructors &&
+    fun matchesImplicitConstructor(
+        rule: MemberConventionRule,
+        aClass: PsiClass,
+        packageName: String,
+    ): Boolean = matchesImplicitConstructor(rule, aClass, packageName, ClassSubjectEvaluator::matchesPredicate)
+
+    fun matchesImplicitConstructor(
+        rule: MemberConventionRule,
+        aClass: PsiClass,
+        packageName: String,
+        classPredicateEvaluator: ClassPredicateEvaluator,
+    ): Boolean = rule.subject == MemberSubjectKind.Constructors &&
         rule.analyzeScope.includes(packageName) &&
-        evaluateImplicitConstructorPredicate(aClass, packageName, rule.predicate) == true
+        evaluateImplicitConstructorPredicate(aClass, packageName, rule.predicate, classPredicateEvaluator) == true
 
     fun implicitConstructorViolations(rule: MemberConventionRule, aClass: PsiClass): List<MemberConditionViolation> = if (rule.polarity == RulePolarity.POSITIVE && !aClass.hasModifierProperty(PsiModifier.PRIVATE)) {
         listOf(MemberConditionViolation.MustBePrivate)
@@ -64,35 +106,45 @@ internal object MemberSubjectEvaluator {
         MemberSubjectKind.Constructors -> member is PsiMethod && member.isConstructor
     }
 
-    private fun evaluatePredicate(member: PsiMember, packageName: String, predicate: MemberPredicateExpr): Boolean? = when (predicate) {
+    private fun evaluatePredicate(
+        member: PsiMember,
+        packageName: String,
+        predicate: MemberPredicateExpr,
+        classPredicateEvaluator: ClassPredicateEvaluator,
+    ): Boolean? = when (predicate) {
         MemberPredicateExpr.All -> true
         is MemberPredicateExpr.IsAnnotatedWith -> (member as? PsiModifierListOwner)?.modifierList?.annotations
             ?.map { it.matches(predicate.qualifiedName, predicate.metaAnnotated) }
             .orEmpty().combinedAnnotationMatch()
         is MemberPredicateExpr.DeclaredInClasses -> member.containingClass?.let {
-            ClassSubjectEvaluator.matchesPredicate(it, packageName, predicate.predicate)
+            classPredicateEvaluator(it, packageName, predicate.predicate)
         }
         is MemberPredicateExpr.And -> combineBoolean(
-            evaluatePredicate(member, packageName, predicate.left),
-            evaluatePredicate(member, packageName, predicate.right),
+            evaluatePredicate(member, packageName, predicate.left, classPredicateEvaluator),
+            evaluatePredicate(member, packageName, predicate.right, classPredicateEvaluator),
         ) { left, right -> left && right }
         is MemberPredicateExpr.Or -> combineBoolean(
-            evaluatePredicate(member, packageName, predicate.left),
-            evaluatePredicate(member, packageName, predicate.right),
+            evaluatePredicate(member, packageName, predicate.left, classPredicateEvaluator),
+            evaluatePredicate(member, packageName, predicate.right, classPredicateEvaluator),
         ) { left, right -> left || right }
     }
 
-    private fun evaluateImplicitConstructorPredicate(aClass: PsiClass, packageName: String, predicate: MemberPredicateExpr): Boolean? = when (predicate) {
+    private fun evaluateImplicitConstructorPredicate(
+        aClass: PsiClass,
+        packageName: String,
+        predicate: MemberPredicateExpr,
+        classPredicateEvaluator: ClassPredicateEvaluator,
+    ): Boolean? = when (predicate) {
         MemberPredicateExpr.All -> true
         is MemberPredicateExpr.IsAnnotatedWith -> false
-        is MemberPredicateExpr.DeclaredInClasses -> ClassSubjectEvaluator.matchesPredicate(aClass, packageName, predicate.predicate)
+        is MemberPredicateExpr.DeclaredInClasses -> classPredicateEvaluator(aClass, packageName, predicate.predicate)
         is MemberPredicateExpr.And -> combineBoolean(
-            evaluateImplicitConstructorPredicate(aClass, packageName, predicate.left),
-            evaluateImplicitConstructorPredicate(aClass, packageName, predicate.right),
+            evaluateImplicitConstructorPredicate(aClass, packageName, predicate.left, classPredicateEvaluator),
+            evaluateImplicitConstructorPredicate(aClass, packageName, predicate.right, classPredicateEvaluator),
         ) { left, right -> left && right }
         is MemberPredicateExpr.Or -> combineBoolean(
-            evaluateImplicitConstructorPredicate(aClass, packageName, predicate.left),
-            evaluateImplicitConstructorPredicate(aClass, packageName, predicate.right),
+            evaluateImplicitConstructorPredicate(aClass, packageName, predicate.left, classPredicateEvaluator),
+            evaluateImplicitConstructorPredicate(aClass, packageName, predicate.right, classPredicateEvaluator),
         ) { left, right -> left || right }
     }
 
