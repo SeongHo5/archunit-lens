@@ -50,11 +50,12 @@ The initial live-warning subset includes:
 - class suffix rules
 - forbidden annotations
 - annotation exclusivity
-- static class conventions for positive/negative annotations, single/any package patterns, suffix/not-suffix, interface/non-interface, and enum/non-enum checks
+- static class conventions for positive/negative annotations and literal meta-annotations, single/any package patterns (including safe private static-final literal package arrays), suffix/not-suffix, interface/non-interface, enum/non-enum, record/non-record, and `JavaModifier.FINAL` checks
 - left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
 - literal class and method meta-annotation rules, including direct and transitively composed annotations
 - exact `noClasses()` field accesses and zero-argument method calls, including bounded `orShould()` when every sibling is supported
+- positive method/constructor declaration conventions plus statically decidable `noFields()`/`noMethods()` rules for annotations, names, convenience modifiers, and supported declaring-class facts
 - `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
 
 ## Rule Overview
@@ -81,9 +82,9 @@ ArchUnit Lens does not execute ArchUnit rules or user/project code. It intention
 - Kotlin ArchUnit rule parsing or Kotlin target-source inspection
 - unused wildcard import statements without a resolved referenced class
 - unresolved dependency references; resolve failures intentionally produce no warning
-- arbitrary method/member subject rules beyond the literal meta-annotation subset
-- method/constructor declaration conventions tracked by issue #24
+- arbitrary member rules beyond the documented positive and negative declaration subsets
 - parameterized method/constructor access, access `Where` predicates, method references, call graphs, and bytecode analysis
+- positive/class condition `orShould()` outside the exact code-access subset (bounded negative `noFields()`/`noMethods()` condition trees are supported)
 - any condition tree containing a custom, dynamic, helper-backed (including lambda), unresolved, or otherwise unsupported sibling
 
 ## Settings

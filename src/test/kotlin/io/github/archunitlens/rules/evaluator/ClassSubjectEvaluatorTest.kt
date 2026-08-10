@@ -11,6 +11,7 @@ import io.github.archunitlens.rules.ClassConventionRule
 import io.github.archunitlens.rules.ClassMetaAnnotationRule
 import io.github.archunitlens.rules.ClassNameSuffixRule
 import io.github.archunitlens.rules.InterfaceNamingRule
+import io.github.archunitlens.rules.MemberConventionRule
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 
@@ -226,6 +227,71 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
         }
     }
 
+    fun testGenericMetaClassFactsSkipUnresolvedCandidateAnnotations() {
+        addAnnotation("Transactional")
+        val unresolvedAnnotationClass = addJavaClass(
+            "src/test/java/com/example/UnresolvedAnnotationCandidate.java",
+            "package com.example; @com.example.missing.Unknown class UnresolvedAnnotationCandidate {}",
+        )
+
+        val negativePredicateRule = parseRule<ClassConventionRule>(
+            classConventionRule(
+                "areNotMetaAnnotatedWith(\"com.example.Transactional\")",
+                "beRecords()",
+            ),
+        )
+        val positiveConditionRule = parseRule<ClassConventionRule>(
+            classConventionRule(
+                "areNotEnums()",
+                "beMetaAnnotatedWith(\"com.example.Transactional\")",
+            ),
+        )
+
+        assertFalse(ClassSubjectEvaluator.matches(negativePredicateRule, unresolvedAnnotationClass, "com.example"))
+        assertTrue(ClassSubjectEvaluator.violations(positiveConditionRule, unresolvedAnnotationClass, "com.example").isEmpty())
+    }
+
+    fun testMemberCountDoesNotMultiplyDeclaringClassHierarchyEvaluation() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/QueryModel.java",
+            "package com.example; public interface QueryModel {}",
+        )
+        val rule = parseRule<MemberConventionRule>(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule no_query_methods = noMethods().that()
+                            .areDeclaredInClassesThat().implement(com.example.QueryModel.class)
+                            .should().bePublic();
+                }
+            """.trimIndent(),
+        )
+        val candidate = addJavaClass(
+            "src/test/java/com/example/Query.java",
+            """
+                package com.example;
+                class Query implements com.example.QueryModel {
+                    void first() {}
+                    void second() {}
+                    void third() {}
+                }
+            """.trimIndent(),
+        )
+        var hierarchyEvaluationCount = 0
+        val cache = ClassPredicateEvaluationCache { aClass, packageName, predicate ->
+            hierarchyEvaluationCount += 1
+            ClassSubjectEvaluator.matchesPredicate(aClass, packageName, predicate)
+        }
+
+        val matches = candidate.methods.map {
+            it.name to MemberSubjectEvaluator.matches(rule, it, "com.example", cache::evaluate)
+        }
+        assertTrue("rule=$rule matches=$matches", matches.all { it.second })
+        assertEquals(1, hierarchyEvaluationCount)
+    }
+
     fun testEvaluatesAndShouldViolationsIndependentlyInSourceOrder() {
         val rule = parseRule<ClassConventionRule>(
             classConventionRule(
@@ -354,6 +420,75 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
             subtype,
             plain,
             ClassConditionViolation.MissingAssignableType("com.example.Base"),
+        )
+    }
+
+    fun testEvaluatesRecordModifierAndMetaAnnotationClassFacts() {
+        addAnnotation("Transactional")
+        addAnnotation("ComposedTransactional", "@com.example.Transactional")
+        addAnnotation("DeepComposedTransactional", "@com.example.ComposedTransactional")
+        myFixture.addFileToProject(
+            "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
+            "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL }",
+        )
+        val directlyAnnotatedClass = addJavaClass(
+            "src/test/java/com/example/DirectlyAnnotatedClass.java",
+            "package com.example; @com.example.Transactional public class DirectlyAnnotatedClass {}",
+        )
+        val annotatedRecord = addJavaClass(
+            "src/test/java/com/example/AnnotatedRecord.java",
+            "package com.example; @com.example.DeepComposedTransactional public record AnnotatedRecord() {}",
+        )
+        val plainClass = addJavaClass(
+            "src/test/java/com/example/PlainClass.java",
+            "package com.example; public class PlainClass {}",
+        )
+        val finalClass = addJavaClass(
+            "src/test/java/com/example/FinalClass.java",
+            "package com.example; public final class FinalClass {}",
+        )
+
+        assertPredicate("areRecords()", annotatedRecord, "com.example", expected = true)
+        assertPredicate("areRecords()", plainClass, "com.example", expected = false)
+        assertPredicate(
+            "areMetaAnnotatedWith(\"com.example.Transactional\")",
+            directlyAnnotatedClass,
+            "com.example",
+            expected = true,
+        )
+        assertPredicate("areMetaAnnotatedWith(\"com.example.Transactional\")", annotatedRecord, "com.example", expected = true)
+        assertPredicate("areMetaAnnotatedWith(\"com.example.Transactional\")", plainClass, "com.example", expected = false)
+        assertPredicate(
+            "areNotMetaAnnotatedWith(\"com.example.Transactional\")",
+            directlyAnnotatedClass,
+            "com.example",
+            expected = false,
+        )
+        assertCondition("beRecords()", annotatedRecord, plainClass, ClassConditionViolation.MustBeRecord)
+        assertCondition("notBeRecords()", plainClass, annotatedRecord, ClassConditionViolation.MustNotBeRecord)
+        assertCondition(
+            "haveModifier(com.tngtech.archunit.core.domain.JavaModifier.FINAL)",
+            finalClass,
+            plainClass,
+            ClassConditionViolation.MissingModifier(io.github.archunitlens.rules.ClassModifier.FINAL),
+        )
+        assertCondition(
+            "notHaveModifier(com.tngtech.archunit.core.domain.JavaModifier.FINAL)",
+            plainClass,
+            finalClass,
+            ClassConditionViolation.ForbiddenModifier(io.github.archunitlens.rules.ClassModifier.FINAL),
+        )
+        assertCondition(
+            "beMetaAnnotatedWith(\"com.example.Transactional\")",
+            annotatedRecord,
+            plainClass,
+            ClassConditionViolation.MissingMetaAnnotation("com.example.Transactional"),
+        )
+        assertCondition(
+            "notBeMetaAnnotatedWith(\"com.example.Transactional\")",
+            plainClass,
+            directlyAnnotatedClass,
+            ClassConditionViolation.ForbiddenMetaAnnotation("com.example.Transactional"),
         )
     }
 

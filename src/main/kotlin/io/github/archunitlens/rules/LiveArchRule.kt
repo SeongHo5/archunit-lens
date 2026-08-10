@@ -24,6 +24,8 @@ data class ClassConventionRule(
     override val sourcePointer: SmartPsiElementPointer<out PsiElement>,
     override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
     override val reason: String? = null,
+    /** Avoids evaluating newly added static class facts against a stale rule cache during indexing. */
+    val suppressDuringDumbMode: Boolean = false,
 ) : LiveArchRule
 
 /**
@@ -122,6 +124,21 @@ data class MethodMetaAnnotationRule(
 data class NoClassesCodeAccessRule(
     override val ruleName: String,
     val condition: ConditionExpr,
+    override val sourcePointer: SmartPsiElementPointer<out PsiElement>,
+    override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
+    override val reason: String? = null,
+) : LiveArchRule
+
+/**
+ * A positive method or constructor declaration convention composed from typed
+ * selector and condition facts.
+ */
+data class MemberConventionRule(
+    override val ruleName: String,
+    val subject: MemberSubjectKind,
+    val predicate: MemberPredicateExpr,
+    val condition: MemberConditionExpr,
+    val polarity: RulePolarity = RulePolarity.POSITIVE,
     override val sourcePointer: SmartPsiElementPointer<out PsiElement>,
     override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
     override val reason: String? = null,

@@ -8,6 +8,7 @@ import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiElementVisitor
+import com.intellij.psi.PsiField
 import com.intellij.psi.PsiImportStatement
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
@@ -26,12 +27,16 @@ import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.ForbiddenAnnotationRule
 import io.github.archunitlens.rules.InterfaceNamingRule
 import io.github.archunitlens.rules.LiveArchRule
+import io.github.archunitlens.rules.MemberConventionRule
+import io.github.archunitlens.rules.MemberSubjectKind
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.NoClassesCodeAccessRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 import io.github.archunitlens.rules.PredicateExpr
+import io.github.archunitlens.rules.evaluator.ClassPredicateEvaluationCache
 import io.github.archunitlens.rules.evaluator.ClassSubjectEvaluator
 import io.github.archunitlens.rules.evaluator.ExactCodeAccessEvaluator
+import io.github.archunitlens.rules.evaluator.MemberSubjectEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
 import io.github.archunitlens.settings.ArchUnitLensSettingsState
 
@@ -73,7 +78,9 @@ class ArchUnitLensInspection : LocalInspectionTool() {
         val interfaceNamingRules = rules.filterIsInstance<InterfaceNamingRule>()
         val classMetaAnnotationRules = rules.filterIsInstance<ClassMetaAnnotationRule>()
         val methodMetaAnnotationRules = rules.filterIsInstance<MethodMetaAnnotationRule>()
+        val memberConventionRules = rules.filterIsInstance<MemberConventionRule>()
         val classConventionRules = rules.filterIsInstance<ClassConventionRule>()
+            .filterNot { rule -> DumbService.isDumb(holder.project) && rule.suppressDuringDumbMode }
         val codeAccessRules = rules.filterIsInstance<NoClassesCodeAccessRule>()
         val fieldAccessRulesByName = codeAccessRules
             .flatMap { rule -> rule.condition.codeAccessLeaves().filterIsInstance<ConditionExpr.AccessField>().map { rule to it } }
@@ -82,6 +89,7 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             .flatMap { rule -> rule.condition.codeAccessLeaves().filterIsInstance<ConditionExpr.CallMethod>().map { rule to it } }
             .groupBy { it.second.methodName }
         val codeAccessAllowedAtBuild = !DumbService.isDumb(holder.project)
+        val memberClassPredicateCache = ClassPredicateEvaluationCache()
 
         return object : JavaElementVisitor() {
             override fun visitReferenceExpression(expression: PsiReferenceExpression) {
@@ -204,6 +212,29 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                             *violation.quickFixes(),
                         )
                     }
+                if (!DumbService.isDumb(holder.project)) {
+                    memberConventionRules
+                        .filter { it.subject == MemberSubjectKind.Constructors }
+                        .filter { aClass.hasImplicitOrdinaryConstructor() }
+                        .filter {
+                            MemberSubjectEvaluator.matchesImplicitConstructor(
+                                it,
+                                aClass,
+                                packageName,
+                                memberClassPredicateCache::evaluate,
+                            )
+                        }
+                        .forEach { rule ->
+                            MemberSubjectEvaluator.implicitConstructorViolations(rule, aClass).forEach { detail ->
+                                val violation = ArchUnitViolation.MemberConvention(rule, detail)
+                                holder.registerProblem(
+                                    nameIdentifier,
+                                    violation.problemMessage(),
+                                    *violation.quickFixes(),
+                                )
+                            }
+                        }
+                }
                 interfaceNamingRules
                     .filter {
                         aClass.isInterface &&
@@ -258,6 +289,49 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             }
 
             override fun visitMethod(method: PsiMethod) {
+                if (!DumbService.isDumb(holder.project) && !method.isConstructor) {
+                    memberConventionRules
+                        .filter { it.subject == MemberSubjectKind.Methods }
+                        .filter {
+                            MemberSubjectEvaluator.matches(
+                                it,
+                                method,
+                                packageName,
+                                memberClassPredicateCache::evaluate,
+                            )
+                        }
+                        .forEach { rule ->
+                            MemberSubjectEvaluator.violations(rule, method).forEach { detail ->
+                                val violation = ArchUnitViolation.MemberConvention(rule, detail)
+                                holder.registerProblem(
+                                    method.nameIdentifier ?: method,
+                                    violation.problemMessage(),
+                                    *violation.quickFixes(),
+                                )
+                            }
+                        }
+                } else if (!DumbService.isDumb(holder.project)) {
+                    memberConventionRules
+                        .filter { it.subject == MemberSubjectKind.Constructors }
+                        .filter {
+                            MemberSubjectEvaluator.matches(
+                                it,
+                                method,
+                                packageName,
+                                memberClassPredicateCache::evaluate,
+                            )
+                        }
+                        .forEach { rule ->
+                            MemberSubjectEvaluator.violations(rule, method).forEach { detail ->
+                                val violation = ArchUnitViolation.MemberConvention(rule, detail)
+                                holder.registerProblem(
+                                    method.nameIdentifier ?: method,
+                                    violation.problemMessage(),
+                                    *violation.quickFixes(),
+                                )
+                            }
+                        }
+                }
                 if (method.containingClass?.isInterface != true) return
                 method.modifierList.annotations.forEach { annotation ->
                     val annotationName = annotation.qualifiedName ?: return@forEach
@@ -273,9 +347,42 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                         }
                 }
             }
+
+            override fun visitField(field: PsiField) {
+                if (DumbService.isDumb(holder.project)) return
+                memberConventionRules
+                    .filter { it.subject == MemberSubjectKind.Fields }
+                    .filter {
+                        MemberSubjectEvaluator.matches(
+                            it,
+                            field,
+                            packageName,
+                            memberClassPredicateCache::evaluate,
+                        )
+                    }
+                    .forEach { rule ->
+                        MemberSubjectEvaluator.violations(rule, field).forEach { detail ->
+                            val violation = ArchUnitViolation.MemberConvention(rule, detail)
+                            holder.registerProblem(
+                                field.nameIdentifier ?: field,
+                                violation.problemMessage(),
+                                *violation.quickFixes(),
+                            )
+                        }
+                    }
+            }
         }
     }
 }
+
+private fun PsiClass.hasImplicitOrdinaryConstructor(): Boolean = nameIdentifier != null &&
+    qualifiedName != null &&
+    constructors.isEmpty() &&
+    !isInterface &&
+    !isAnnotationType &&
+    !isEnum &&
+    !isRecord &&
+    PsiTreeUtil.getParentOfType(this, PsiMethod::class.java) == null
 
 private data class ForbiddenDependencyMatch(
     val rule: PackageDependencyBanRule,
@@ -295,6 +402,7 @@ private fun LiveArchRule.isEnabledBy(
     is ClassMetaAnnotationRule,
     is MethodMetaAnnotationRule,
     -> settings.annotationRulesEnabled
+    is MemberConventionRule -> settings.memberDeclarationRulesEnabled
     is InterfaceNamingRule -> settings.interfaceRulesEnabled
     is NoClassesCodeAccessRule -> settings.dependencyRulesEnabled
 }
@@ -309,6 +417,7 @@ private fun PredicateExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     is PredicateExpr.Leaf -> false
     is PredicateExpr.AreAnnotatedWith,
     is PredicateExpr.AreNotAnnotatedWith,
+    is PredicateExpr.AreMetaAnnotatedWith,
     -> settings.annotationRulesEnabled
     is PredicateExpr.ResideInPackages,
     is PredicateExpr.HaveSimpleNameEndingWith,
@@ -316,6 +425,9 @@ private fun PredicateExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     -> settings.classNamingRulesEnabled
     is PredicateExpr.AreInterfaces,
     is PredicateExpr.AreEnums,
+    is PredicateExpr.AreRecords,
+    is PredicateExpr.AreAssignableTo,
+    is PredicateExpr.Implement,
     -> settings.interfaceRulesEnabled
     is PredicateExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
     is PredicateExpr.Or -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
@@ -329,8 +441,11 @@ private fun ConditionExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     -> settings.classNamingRulesEnabled
     is ConditionExpr.BeInterfaces,
     is ConditionExpr.BeEnums,
+    is ConditionExpr.BeRecords,
+    is ConditionExpr.HaveModifier,
     is ConditionExpr.BeAssignableTo,
     -> settings.interfaceRulesEnabled
+    is ConditionExpr.BeMetaAnnotatedWith -> settings.annotationRulesEnabled
     is ConditionExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
     is ConditionExpr.AccessField,
     is ConditionExpr.CallMethod,

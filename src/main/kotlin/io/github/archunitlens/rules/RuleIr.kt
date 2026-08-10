@@ -25,11 +25,15 @@ sealed interface PredicateExpr {
     data class Leaf(val predicate: String) : PredicateExpr
     data class AreAnnotatedWith(val qualifiedName: String) : PredicateExpr
     data class AreNotAnnotatedWith(val qualifiedName: String) : PredicateExpr
+    data class AreMetaAnnotatedWith(val qualifiedName: String, val expected: Boolean) : PredicateExpr
+    data class AreAssignableTo(val qualifiedName: String, val expected: Boolean) : PredicateExpr
+    data class Implement(val qualifiedName: String, val expected: Boolean) : PredicateExpr
     data class ResideInPackages(val patterns: List<String>) : PredicateExpr
     data class HaveSimpleNameEndingWith(val suffix: String) : PredicateExpr
     data class HaveSimpleNameNotEndingWith(val suffix: String) : PredicateExpr
     data class AreInterfaces(val expected: Boolean) : PredicateExpr
     data class AreEnums(val expected: Boolean) : PredicateExpr
+    data class AreRecords(val expected: Boolean) : PredicateExpr
     data class And(val left: PredicateExpr, val right: PredicateExpr) : PredicateExpr
     data class Or(val left: PredicateExpr, val right: PredicateExpr) : PredicateExpr
 }
@@ -44,6 +48,9 @@ sealed interface ConditionExpr {
     data class HaveSimpleNameEndingWith(val suffix: String, val required: Boolean) : ConditionExpr
     data class BeInterfaces(val required: Boolean) : ConditionExpr
     data class BeEnums(val required: Boolean) : ConditionExpr
+    data class BeRecords(val required: Boolean) : ConditionExpr
+    data class HaveModifier(val modifier: ClassModifier, val required: Boolean) : ConditionExpr
+    data class BeMetaAnnotatedWith(val qualifiedName: String, val required: Boolean) : ConditionExpr
     data class BeAssignableTo(val qualifiedName: String) : ConditionExpr
     data class AccessField(val ownerQualifiedName: String, val fieldName: String) : ConditionExpr
     data class CallMethod(
@@ -53,6 +60,73 @@ sealed interface ConditionExpr {
     ) : ConditionExpr
     data class And(val left: ConditionExpr, val right: ConditionExpr) : ConditionExpr
     data class Or(val left: ConditionExpr, val right: ConditionExpr) : ConditionExpr
+}
+
+/**
+ * Statically evaluable selector facts for positive method and constructor subjects.
+ */
+sealed interface MemberPredicateExpr {
+    data object All : MemberPredicateExpr
+    data class IsAnnotatedWith(
+        val qualifiedName: String,
+        val metaAnnotated: Boolean,
+    ) : MemberPredicateExpr
+
+    data class DeclaredInClasses(val predicate: PredicateExpr) : MemberPredicateExpr
+    data class And(val left: MemberPredicateExpr, val right: MemberPredicateExpr) : MemberPredicateExpr
+    data class Or(val left: MemberPredicateExpr, val right: MemberPredicateExpr) : MemberPredicateExpr
+}
+
+/**
+ * Statically evaluable declaration conditions for positive member subjects.
+ */
+sealed interface MemberConditionExpr {
+    data object BePrivate : MemberConditionExpr
+    data object BeStatic : MemberConditionExpr
+    data class HaveRawReturnType(val qualifiedName: String) : MemberConditionExpr
+    data class BeAnnotatedWith(
+        val qualifiedName: String,
+        val metaAnnotated: Boolean,
+        val required: Boolean,
+    ) : MemberConditionExpr
+
+    data class HaveModifier(val modifier: String, val required: Boolean) : MemberConditionExpr
+    data class HaveName(val name: String, val required: Boolean) : MemberConditionExpr
+    data class HaveNameMatching(
+        val pattern: String,
+        val required: Boolean,
+    ) : MemberConditionExpr {
+        internal val compiledPattern = Regex(pattern)
+    }
+    data class And(val left: MemberConditionExpr, val right: MemberConditionExpr) : MemberConditionExpr
+    data class Or(val left: MemberConditionExpr, val right: MemberConditionExpr) : MemberConditionExpr
+}
+
+/**
+ * Positive declaration subjects that can be evaluated without visiting method bodies.
+ */
+sealed interface MemberSubjectKind {
+    data object Fields : MemberSubjectKind
+    data object Methods : MemberSubjectKind
+    data object Constructors : MemberSubjectKind
+}
+
+/**
+ * Class-level ArchUnit modifier facts that Java PSI can prove without loading
+ * bytecode-only metadata or interpreting user code.
+ */
+enum class ClassModifier {
+    FINAL,
+}
+
+/**
+ * Determines whether a supported rule requires or forbids declarations that satisfy its condition.
+ * [POSITIVE] reports selected declarations whose condition is not satisfied; [NEGATIVE] reports
+ * selected declarations whose condition is satisfied.
+ */
+enum class RulePolarity {
+    POSITIVE,
+    NEGATIVE,
 }
 
 /**
@@ -102,6 +176,7 @@ data class RuleDescriptor(
     val condition: ConditionExpr,
     val reason: String?,
     val supportStatus: SupportStatus,
+    val polarity: RulePolarity = RulePolarity.POSITIVE,
 )
 
 /**
