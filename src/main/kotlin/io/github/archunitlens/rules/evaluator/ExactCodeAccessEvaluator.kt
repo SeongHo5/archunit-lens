@@ -165,7 +165,7 @@ internal object ExactCodeAccessEvaluator {
         }
         val sourceClass = enclosingConstructor.containingClass?.takeUnless { it.isEnum || it.isRecord } ?: return null
         val targetClass = sourceClass.accessibleDirectSuperClass() ?: return null
-        if (!targetClass.hasImplicitDefaultConstructor()) return null
+        if (!targetClass.hasImplicitDefaultConstructor() || !targetClass.hasValidSuperEnclosingInstance(this)) return null
         return ResolvedConstructorCall(targetClass.qualifiedName ?: return null, emptyList())
     }
 
@@ -187,6 +187,15 @@ internal object ExactCodeAccessEvaluator {
         val enclosingClass = containingClass ?: return false
         return expression.qualifier != null ||
             InheritanceUtil.hasEnclosingInstanceInScope(enclosingClass, expression, false, false)
+    }
+
+    private fun PsiClass.hasValidSuperEnclosingInstance(call: PsiMethodCallExpression): Boolean {
+        if (!PsiUtil.isInnerClass(this)) return true
+        val enclosingClass = containingClass ?: return false
+        val qualifierType = call.methodExpression.qualifierExpression?.type
+            ?: return InheritanceUtil.hasEnclosingInstanceInScope(enclosingClass, call, false, false)
+        val qualifierClass = PsiUtil.resolveClassInType(TypeConversionUtil.erasure(qualifierType)) ?: return false
+        return InheritanceUtil.isInheritorOrSelf(qualifierClass, enclosingClass, true)
     }
 
     private fun PsiClass.accessibleDirectSuperClass(): PsiClass? {

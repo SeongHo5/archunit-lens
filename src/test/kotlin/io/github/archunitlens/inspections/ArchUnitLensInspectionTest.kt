@@ -1709,6 +1709,46 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertEquals(listOf("super", "ImplicitParent"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
     }
 
+    fun testImplicitDefaultSuperFallbackRequiresInnerSuperclassEnclosingInstance() {
+        addSignatureCodeAccessStubs()
+        val constructorTargets = myFixture.addFileToProject(
+            "src/test/java/org/example/Outer.java",
+            """
+                package org.example;
+                public class Outer {
+                    public class InnerParent {}
+                    public class NestedChild extends InnerParent {
+                        public NestedChild() { super(); }
+                    }
+                }
+                class OuterChild extends Outer {}
+                class ExternalChild extends Outer.InnerParent {
+                    ExternalChild() { super(); }
+                    ExternalChild(Outer outer) { outer.super(); }
+                    ExternalChild(OuterChild outer) { outer.super(); }
+                    ExternalChild(java.lang.String wrong) { wrong.super(); }
+                }
+            """.trimIndent(),
+        )
+        addArchitectureRules(
+            """
+                package com.example;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule inner_default_constructor = noClasses().should()
+                            .callConstructor(org.example.Outer.InnerParent.class);
+                }
+            """.trimIndent(),
+        )
+        myFixture.configureFromExistingVirtualFile(constructorTargets.virtualFile)
+
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 3, warnings.size)
+        assertEquals(listOf("super", "super", "super"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
     fun testImplicitDefaultConstructorFallbackFailsClosedForInvalidCalls() {
         addSignatureCodeAccessStubs()
         myFixture.addFileToProject(
