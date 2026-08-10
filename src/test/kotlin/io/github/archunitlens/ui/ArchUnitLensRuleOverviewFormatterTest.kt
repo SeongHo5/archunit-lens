@@ -111,6 +111,43 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         assertFalse(output.contains(ArchUnitLensBundle.message("overview.unsupported.multiPackageRuleShape")))
     }
 
+    fun testFormatsSupportedStaticClassFacts() {
+        myFixture.addFileToProject(
+            "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
+            "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Transactional.java",
+            "package com.example; public @interface Transactional {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/ArchitectureRules.java",
+            """
+                import com.tngtech.archunit.core.domain.JavaModifier;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    private static final String[] UTIL_PACKAGES = {"..util.."};
+                    @ArchTest static final ArchRule utility_records = classes().that()
+                            .resideInAnyPackage(UTIL_PACKAGES)
+                            .and().areMetaAnnotatedWith("com.example.Transactional")
+                            .should().beRecords().andShould().notHaveModifier(JavaModifier.FINAL);
+                }
+            """.trimIndent(),
+        )
+
+        val output = ArchUnitLensRuleOverviewFormatter.render(
+            discoveries = project.service<ArchRuleProjectService>().discoveries().toOverviewItems("ArchitectureRules.java"),
+            metrics = project.service<ArchRuleProjectService>().scanMetrics(),
+        )
+
+        assertTrue(output.contains("areMetaAnnotatedWith(com.example.Transactional)"))
+        assertTrue(output.contains("beRecords"))
+        assertTrue(output.contains("notHaveModifier(FINAL)"))
+        assertTrue(output.contains(statusLine(ArchUnitLensBundle.message("overview.status.supported"))))
+    }
+
     fun testFormatsHelperBackedCustomConditionsWithoutTreatingBecauseAsCondition() {
         myFixture.addFileToProject(
             "src/test/java/com/example/HelperBackedCustomConditions.java",

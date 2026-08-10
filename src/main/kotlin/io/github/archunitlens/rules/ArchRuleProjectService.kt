@@ -13,6 +13,7 @@ import com.intellij.openapi.roots.ProjectRootModificationTracker
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiClassObjectAccessExpression
 import com.intellij.psi.PsiJavaFile
+import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.search.GlobalSearchScope
@@ -373,14 +374,26 @@ private fun PsiJavaFile.textHashStamp(): Int = text.hashCode()
 private fun PsiJavaFile.requiresTypeResolution(): Boolean {
     if (PsiTreeUtil.findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null) return true
     val methodCalls = PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
-    if (methodCalls.any {
-            it.methodExpression.referenceName in setOf(
+    if (
+        methodCalls.any { call ->
+            call.methodExpression.referenceName in setOf(
                 "beAssignableTo",
                 "areAssignableTo",
                 "areNotAssignableTo",
                 "implement",
                 "doNotImplement",
-            )
+                "areMetaAnnotatedWith",
+                "areNotMetaAnnotatedWith",
+                "beMetaAnnotatedWith",
+                "notBeMetaAnnotatedWith",
+                "haveModifier",
+                "notHaveModifier",
+            ) ||
+                (
+                    call.methodExpression.referenceName == "resideInAnyPackage" &&
+                        call.argumentList.expressions.singleOrNull()
+                            ?.let { it !is PsiLiteralExpression } == true
+                    )
         }
     ) {
         return true

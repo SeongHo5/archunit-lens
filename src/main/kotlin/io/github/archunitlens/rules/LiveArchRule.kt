@@ -24,6 +24,8 @@ data class ClassConventionRule(
     override val sourcePointer: SmartPsiElementPointer<out PsiElement>,
     override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
     override val reason: String? = null,
+    /** Avoids evaluating newly added static class facts against a stale rule cache during indexing. */
+    val suppressDuringDumbMode: Boolean = false,
 ) : LiveArchRule
 
 /**

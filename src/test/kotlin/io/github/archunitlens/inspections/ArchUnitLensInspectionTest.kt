@@ -1274,6 +1274,138 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertTrue(warningDescriptions().isEmpty())
     }
 
+    fun testClassFactsHighlightRecordsAndResolvedMetaModifiersWithBoundedPackageList() {
+        myFixture.addFileToProject(
+            "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
+            "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Transactional.java",
+            "package com.example; public @interface Transactional {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/ComposedTransactional.java",
+            "package com.example; @com.example.Transactional public @interface ComposedTransactional {}",
+        )
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.core.domain.JavaModifier;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    private static final String[] RECORD_PACKAGES = {"..util.."};
+                    private static final String[] META_PACKAGES = {"..util.."};
+                    @ArchTest static final ArchRule record_types = classes().that()
+                            .resideInAnyPackage(RECORD_PACKAGES)
+                            .and().areMetaAnnotatedWith("com.example.Transactional")
+                            .should().beRecords().andShould().haveModifier(JavaModifier.FINAL);
+                    @ArchTest static final ArchRule meta_records_are_not_final = classes().that()
+                            .resideInAnyPackage(META_PACKAGES)
+                            .and().areMetaAnnotatedWith(com.example.Transactional.class)
+                            .should().notHaveModifier(JavaModifier.FINAL);
+                }
+            """.trimIndent(),
+        )
+        assertEquals(2, project.service<ArchRuleProjectService>().discoveries().size)
+        assertTrue(project.service<ArchRuleProjectService>().discoveries().all { it.liveRule != null })
+
+        myFixture.configureByText(
+            "BrokenUtility.java",
+            "package com.example.util; @com.example.ComposedTransactional class BrokenUtility {}",
+        )
+        val brokenWarnings = warningDescriptions()
+        assertEquals(2, brokenWarnings.size)
+        assertTrue(brokenWarnings.any { it.contains(ArchUnitLensBundle.message("inspection.problem.class.mustBeRecord")) })
+        assertTrue(
+            brokenWarnings.any {
+                it.contains(ArchUnitLensBundle.message("inspection.problem.class.missingModifier", "FINAL"))
+            },
+        )
+
+        myFixture.configureByText(
+            "UtilityRecord.java",
+            "package com.example.util; @com.example.ComposedTransactional record UtilityRecord() {}",
+        )
+        val recordWarnings = warningDescriptions()
+        assertEquals(1, recordWarnings.size)
+        assertTrue(
+            recordWarnings.single().contains(ArchUnitLensBundle.message("inspection.problem.class.forbiddenModifier", "FINAL")),
+        )
+    }
+
+    fun testUnsafeStaticClassFactsProduceNoWarnings() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/JavaModifier.java",
+            "package com.example; public enum JavaModifier { FINAL }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Packages.java",
+            "package com.example; public class Packages { public static final String[] VALUES = {\"..util..\"}; }",
+        )
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    private static final String[] MUTABLE = {"..util.."};
+                    private static final String[] PACKAGES = {"..util.."};
+                    static { MUTABLE[0] = "..changed.."; }
+                    @ArchTest static final ArchRule mutable_array = classes().that()
+                            .resideInAnyPackage(MUTABLE).should().beRecords();
+                    @ArchTest static final ArchRule cross_file_array = classes().that()
+                            .resideInAnyPackage(com.example.Packages.VALUES).should().beRecords();
+                    @ArchTest static final ArchRule foreign_modifier = classes()
+                            .should().haveModifier(com.example.JavaModifier.FINAL);
+                    @ArchTest static final ArchRule unresolved_meta = classes()
+                            .should().beMetaAnnotatedWith("com.example.missing.Transactional");
+                    @ArchTest static final ArchRule helper_array = classes().that()
+                            .resideInAnyPackage(packages()).should().beRecords();
+                    @ArchTest static final ArchRule helper_escape = classes().that()
+                            .resideInAnyPackage(PACKAGES).should().beRecords();
+                    private static String[] packages() { return new String[] {"..util.."}; }
+                    private static void resideInAnyPackage(String[] values) {}
+                    static { resideInAnyPackage(PACKAGES); }
+                }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText("Candidate.java", "package com.example.util; public final class Candidate {}")
+
+        assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testStaticClassFactsDoNotWarnDuringDumbModeWhileExistingRulesStillDo() {
+        addArchitectureRules(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule existing_interface = classes().should().beInterfaces();
+                    @ArchTest static final ArchRule new_record = classes().should().beRecords();
+                }
+            """.trimIndent(),
+        )
+        val candidateFile = myFixture.configureByText(
+            "Candidate.java",
+            "package com.example; class Candidate {}",
+        ) as PsiJavaFile
+        val service = project.service<ArchRuleProjectService>()
+        assertEquals(2, service.rulesForPackage(candidateFile.packageName).size)
+
+        DumbModeTestUtils.runInDumbModeSynchronously(project) {
+            val holder = ProblemsHolder(InspectionManager.getInstance(project), candidateFile, false)
+            val visitor = ArchUnitLensInspection().buildVisitor(holder, false) as JavaElementVisitor
+            visitor.visitClass(candidateFile.classes.single())
+
+            val problems = holder.results
+            assertEquals(1, problems.size)
+            assertTrue(problems.single().descriptionTemplate.contains(ArchUnitLensBundle.message("inspection.problem.class.mustBeInterface")))
+        }
+    }
+
     fun testMethodAndConstructorDeclarationConventionsHighlightExplicitAndImplicitUtilityDeclarations() {
         addMemberConventionStubs()
         addArchitectureRulesFixture("methodConstructorConventions")
