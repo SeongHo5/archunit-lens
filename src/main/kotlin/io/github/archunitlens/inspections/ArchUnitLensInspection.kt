@@ -74,6 +74,7 @@ class ArchUnitLensInspection : LocalInspectionTool() {
         val methodMetaAnnotationRules = rules.filterIsInstance<MethodMetaAnnotationRule>()
         val memberConventionRules = rules.filterIsInstance<MemberConventionRule>()
         val classConventionRules = rules.filterIsInstance<ClassConventionRule>()
+            .filterNot { rule -> DumbService.isDumb(holder.project) && rule.suppressDuringDumbMode }
 
         return object : JavaElementVisitor() {
             override fun visitImportStatement(statement: PsiImportStatement) {
@@ -325,7 +326,9 @@ private fun PredicateExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     -> settings.classNamingRulesEnabled
     is PredicateExpr.AreInterfaces,
     is PredicateExpr.AreEnums,
+    is PredicateExpr.AreRecords,
     -> settings.interfaceRulesEnabled
+    is PredicateExpr.AreMetaAnnotatedWith -> settings.annotationRulesEnabled
     is PredicateExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
     is PredicateExpr.Or -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
 }
@@ -338,7 +341,10 @@ private fun ConditionExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     -> settings.classNamingRulesEnabled
     is ConditionExpr.BeInterfaces,
     is ConditionExpr.BeEnums,
+    is ConditionExpr.BeRecords,
+    is ConditionExpr.HaveModifier,
     is ConditionExpr.BeAssignableTo,
     -> settings.interfaceRulesEnabled
+    is ConditionExpr.BeMetaAnnotatedWith -> settings.annotationRulesEnabled
     is ConditionExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
 }

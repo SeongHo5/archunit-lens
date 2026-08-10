@@ -19,6 +19,10 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             "src/test/java/com/example/QueryMapper.java",
             "package com.example; public interface QueryMapper {}",
         )
+        myFixture.addFileToProject(
+            "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
+            "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL, STATIC }",
+        )
     }
 
     fun testParsesPackageDependencyBanRule() {
@@ -958,6 +962,198 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertNull(discovered.liveRule)
         val status = discovered.descriptor.supportStatus as SupportStatus.Unsupported
         assertTrue(status.reason is UnsupportedReason.UnsupportedArgument)
+    }
+
+    fun testParsesBoundedStaticClassFacts() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Transactional.java",
+            "package com.example; public @interface Transactional {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Composed.java",
+            "package com.example; @Transactional public @interface Composed {}",
+        )
+
+        val discovered = discoverSingleRule(
+            """
+                import com.tngtech.archunit.core.domain.JavaModifier;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    private static final String[] UTIL_PACKAGES = {"..util..", "..support.."};
+                    @ArchTest static final ArchRule rule = classes().that()
+                            .resideInAnyPackage(UTIL_PACKAGES)
+                            .and().areMetaAnnotatedWith(com.example.Transactional.class)
+                            .should().beRecords().andShould().haveModifier(JavaModifier.FINAL);
+                }
+            """.trimIndent(),
+        )
+
+        assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
+        assertEquals(
+            PredicateExpr.And(
+                PredicateExpr.ResideInPackages(listOf("..util..", "..support..")),
+                PredicateExpr.AreMetaAnnotatedWith("com.example.Transactional", expected = true),
+            ),
+            discovered.descriptor.predicate,
+        )
+        assertEquals(
+            ConditionExpr.And(
+                ConditionExpr.BeRecords(required = true),
+                ConditionExpr.HaveModifier(ClassModifier.FINAL, required = true),
+            ),
+            discovered.descriptor.condition,
+        )
+    }
+
+    fun testRejectsUnsafeStaticClassFactArgumentsPrecisely() {
+        val cases = mapOf(
+            "mutable" to """
+                private static String[] PACKAGES = {"..util.."};
+                @ArchTest static final ArchRule rule = classes().that().resideInAnyPackage(PACKAGES).should().beRecords();
+            """,
+            "crossFile" to """
+                @ArchTest static final ArchRule rule = classes().that().resideInAnyPackage(com.example.Packages.VALUES).should().beRecords();
+            """,
+            "helper" to """
+                private static final String[] PACKAGES = helper();
+                @ArchTest static final ArchRule rule = classes().that().resideInAnyPackage(PACKAGES).should().beRecords();
+            """,
+            "sameNameHelperEscape" to """
+                private static final String[] PACKAGES = {"..util.."};
+                static { resideInAnyPackage(PACKAGES); }
+                private static void resideInAnyPackage(String[] values) {}
+                @ArchTest static final ArchRule rule = classes().that().resideInAnyPackage(PACKAGES).should().beRecords();
+            """,
+            "foreignModifier" to """
+                @ArchTest static final ArchRule rule = classes().should().haveModifier(com.example.JavaModifier.FINAL);
+            """,
+            "unsupportedModifier" to """
+                @ArchTest static final ArchRule rule = classes().should().haveModifier(com.tngtech.archunit.core.domain.JavaModifier.STATIC);
+            """,
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Packages.java",
+            "package com.example; public class Packages { public static final String[] VALUES = {\"..util..\"}; }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/JavaModifier.java",
+            "package com.example; public enum JavaModifier { FINAL }",
+        )
+
+        cases.forEach { (name, body) ->
+            val discovered = discoverSingleRule(
+                """
+                    import com.tngtech.archunit.junit.ArchTest;
+                    import com.tngtech.archunit.lang.ArchRule;
+                    import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                    class ArchitectureRules {
+                        $body
+                        private static String[] helper() { return null; }
+                    }
+                """.trimIndent(),
+            )
+            assertNull("$name must stay metadata-only", discovered.liveRule)
+            assertTrue(
+                "$name reason must identify the unsupported argument",
+                (discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnsupportedArgument,
+            )
+        }
+    }
+
+    fun testRejectsStaticPackageArraysMutatedElsewhereInTheirEnclosingNest() {
+        val cases = mapOf(
+            "enclosing" to """
+                class ArchitectureRules {
+                    static class NestedRules {
+                        private static final String[] PACKAGES = {"..util.."};
+                        @ArchTest static final ArchRule rule = classes().that()
+                                .resideInAnyPackage(PACKAGES).should().beRecords();
+                    }
+                    static { NestedRules.PACKAGES[0] = "..changed.."; }
+                }
+            """,
+            "sibling" to """
+                class ArchitectureRules {
+                    static class NestedRules {
+                        private static final String[] PACKAGES = {"..util.."};
+                        @ArchTest static final ArchRule rule = classes().that()
+                                .resideInAnyPackage(PACKAGES).should().beRecords();
+                    }
+                    static class Mutator {
+                        static { NestedRules.PACKAGES[0] = "..changed.."; }
+                    }
+                }
+            """,
+        )
+
+        cases.forEach { (name, code) ->
+            val discovered = discoverSingleRule(
+                """
+                    import com.tngtech.archunit.junit.ArchTest;
+                    import com.tngtech.archunit.lang.ArchRule;
+                    import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                    $code
+                """.trimIndent(),
+            )
+
+            assertNull("$name nest mutation must stay metadata-only", discovered.liveRule)
+            assertTrue(
+                "$name nest mutation must identify the unsupported argument",
+                (discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason is UnsupportedReason.UnsupportedArgument,
+            )
+        }
+    }
+
+    fun testAllowsStaticPackageArrayWithSameNamedSiblingField() {
+        val discovered = discoverSingleRule(
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    static class NestedRules {
+                        private static final String[] PACKAGES = {"..util.."};
+                        @ArchTest static final ArchRule rule = classes().that()
+                                .resideInAnyPackage(PACKAGES).should().beRecords();
+                    }
+                    static class Sibling {
+                        private static final String[] PACKAGES = {"..other.."};
+                        static { PACKAGES[0] = "..changed.."; }
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        assertEquals(SupportStatus.Supported, discovered.descriptor.supportStatus)
+        assertNotNull(discovered.liveRule)
+    }
+
+    fun testUnresolvedMetaAnnotationAndUnsupportedSiblingStayMetadataOnly() {
+        val unresolved = discoverSingleRule(
+            classConventionRule(
+                "areMetaAnnotatedWith(\"com.example.missing.Transactional\")",
+                "beRecords()",
+            ),
+        )
+        assertNull(unresolved.liveRule)
+        assertEquals(
+            UnsupportedReason.UnresolvedSymbol("areMetaAnnotatedWith", "com.example.missing.Transactional"),
+            (unresolved.descriptor.supportStatus as SupportStatus.Unsupported).reason,
+        )
+
+        val sibling = discoverSingleRule(
+            classConventionRule(
+                "areRecords().and().haveSimpleNameMatching(\".*\")",
+                "haveModifier(com.tngtech.archunit.core.domain.JavaModifier.FINAL)",
+            ),
+        )
+        assertNull(sibling.liveRule)
+        assertEquals(
+            UnsupportedReason.UnsupportedOrAmbiguousRuleChain,
+            (sibling.descriptor.supportStatus as SupportStatus.Unsupported).reason,
+        )
     }
 
     fun testDeferredDeclarationAndCodeAccessRulesStayMetadataOnly() {

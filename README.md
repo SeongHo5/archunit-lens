@@ -50,7 +50,7 @@ The initial live-warning subset includes:
 - class suffix rules
 - forbidden annotations
 - annotation exclusivity
-- static class conventions for positive/negative annotations, single/any package patterns, suffix/not-suffix, interface/non-interface, and enum/non-enum checks
+- static class conventions for positive/negative annotations and literal meta-annotations, single/any package patterns (including safe private static-final literal package arrays), suffix/not-suffix, interface/non-interface, enum/non-enum, record/non-record, and `JavaModifier.FINAL` checks
 - left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
 - literal class and method meta-annotation rules, including direct and transitively composed annotations

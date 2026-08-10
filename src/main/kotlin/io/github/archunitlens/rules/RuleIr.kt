@@ -30,6 +30,8 @@ sealed interface PredicateExpr {
     data class HaveSimpleNameNotEndingWith(val suffix: String) : PredicateExpr
     data class AreInterfaces(val expected: Boolean) : PredicateExpr
     data class AreEnums(val expected: Boolean) : PredicateExpr
+    data class AreRecords(val expected: Boolean) : PredicateExpr
+    data class AreMetaAnnotatedWith(val qualifiedName: String, val expected: Boolean) : PredicateExpr
     data class And(val left: PredicateExpr, val right: PredicateExpr) : PredicateExpr
     data class Or(val left: PredicateExpr, val right: PredicateExpr) : PredicateExpr
 }
@@ -44,6 +46,9 @@ sealed interface ConditionExpr {
     data class HaveSimpleNameEndingWith(val suffix: String, val required: Boolean) : ConditionExpr
     data class BeInterfaces(val required: Boolean) : ConditionExpr
     data class BeEnums(val required: Boolean) : ConditionExpr
+    data class BeRecords(val required: Boolean) : ConditionExpr
+    data class HaveModifier(val modifier: ClassModifier, val required: Boolean) : ConditionExpr
+    data class BeMetaAnnotatedWith(val qualifiedName: String, val required: Boolean) : ConditionExpr
     data class BeAssignableTo(val qualifiedName: String) : ConditionExpr
     data class And(val left: ConditionExpr, val right: ConditionExpr) : ConditionExpr
 }
@@ -79,6 +84,14 @@ sealed interface MemberConditionExpr {
 sealed interface MemberSubjectKind {
     data object Methods : MemberSubjectKind
     data object Constructors : MemberSubjectKind
+}
+
+/**
+ * Class-level ArchUnit modifier facts that Java PSI can prove without loading
+ * bytecode-only metadata or interpreting user code.
+ */
+enum class ClassModifier {
+    FINAL,
 }
 
 /**

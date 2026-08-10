@@ -255,6 +255,12 @@ internal object ArchUnitLensRuleOverviewFormatter {
         is PredicateExpr.HaveSimpleNameNotEndingWith -> "haveSimpleNameNotEndingWith($suffix)"
         is PredicateExpr.AreInterfaces -> if (expected) "areInterfaces" else "areNotInterfaces"
         is PredicateExpr.AreEnums -> if (expected) "areEnums" else "areNotEnums"
+        is PredicateExpr.AreRecords -> if (expected) "areRecords" else "areNotRecords"
+        is PredicateExpr.AreMetaAnnotatedWith -> if (expected) {
+            "areMetaAnnotatedWith($qualifiedName)"
+        } else {
+            "areNotMetaAnnotatedWith($qualifiedName)"
+        }
         is PredicateExpr.And -> "(${left.display()} AND ${right.display()})"
         is PredicateExpr.Or -> "(${left.display()} OR ${right.display()})"
     }
@@ -274,6 +280,17 @@ internal object ArchUnitLensRuleOverviewFormatter {
         }
         is ConditionExpr.BeInterfaces -> if (required) "beInterfaces" else "notBeInterfaces"
         is ConditionExpr.BeEnums -> if (required) "beEnums" else "notBeEnums"
+        is ConditionExpr.BeRecords -> if (required) "beRecords" else "notBeRecords"
+        is ConditionExpr.HaveModifier -> if (required) {
+            "haveModifier(${modifier.name})"
+        } else {
+            "notHaveModifier(${modifier.name})"
+        }
+        is ConditionExpr.BeMetaAnnotatedWith -> if (required) {
+            "beMetaAnnotatedWith($qualifiedName)"
+        } else {
+            "notBeMetaAnnotatedWith($qualifiedName)"
+        }
         is ConditionExpr.BeAssignableTo -> "beAssignableTo($qualifiedName)"
         is ConditionExpr.And -> "(${left.display()} AND ${right.display()})"
     }
