@@ -15,7 +15,6 @@ import javax.swing.JTextField
  * Settings page for the first ArchUnit Lens inspection and overview preferences.
  */
 class ArchUnitLensConfigurable : Configurable {
-    private val settings: ArchUnitLensSettings = service()
     private var panel: JPanel? = null
     private lateinit var classNamingRules: JCheckBox
     private lateinit var dependencyRules: JCheckBox
@@ -76,7 +75,7 @@ class ArchUnitLensConfigurable : Configurable {
     }
 
     override fun isModified(): Boolean {
-        val state = settings.state
+        val state = service<ArchUnitLensSettings>().state
         return classNamingRules.isSelected != state.classNamingRulesEnabled ||
             dependencyRules.isSelected != state.dependencyRulesEnabled ||
             annotationRules.isSelected != state.annotationRulesEnabled ||
@@ -90,7 +89,7 @@ class ArchUnitLensConfigurable : Configurable {
     }
 
     override fun apply() {
-        val state = settings.state
+        val state = service<ArchUnitLensSettings>().state
         state.classNamingRulesEnabled = classNamingRules.isSelected
         state.dependencyRulesEnabled = dependencyRules.isSelected
         state.annotationRulesEnabled = annotationRules.isSelected
@@ -104,7 +103,7 @@ class ArchUnitLensConfigurable : Configurable {
     }
 
     override fun reset() {
-        val state = settings.state
+        val state = service<ArchUnitLensSettings>().state
         classNamingRules.isSelected = state.classNamingRulesEnabled
         dependencyRules.isSelected = state.dependencyRulesEnabled
         annotationRules.isSelected = state.annotationRulesEnabled

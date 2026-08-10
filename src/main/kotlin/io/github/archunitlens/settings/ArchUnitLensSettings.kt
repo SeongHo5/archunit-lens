@@ -1,6 +1,7 @@
 package io.github.archunitlens.settings
 
 import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.RoamingType
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
@@ -9,7 +10,10 @@ import com.intellij.openapi.components.Storage
  * Persistent user preferences for ArchUnit Lens inspections and rule overview.
  */
 @Service(Service.Level.APP)
-@State(name = "ArchUnitLensSettings", storages = [Storage("archUnitLens.xml")])
+@State(
+    name = "ArchUnitLensSettings",
+    storages = [Storage(value = "archUnitLens.xml", roamingType = RoamingType.DISABLED)],
+)
 class ArchUnitLensSettings : PersistentStateComponent<ArchUnitLensSettingsState> {
     private var currentState = ArchUnitLensSettingsState()
 
