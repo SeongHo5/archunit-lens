@@ -430,6 +430,7 @@ private fun LiveArchRule.appliesToPackage(packageName: String): Boolean = analyz
         is InterfaceNamingRule,
         is ClassMetaAnnotationRule,
         is MethodMetaAnnotationRule,
+        is NoClassesCodeAccessRule,
         is MemberConventionRule,
         -> true
     }

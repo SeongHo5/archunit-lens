@@ -52,7 +52,14 @@ sealed interface ConditionExpr {
     data class HaveModifier(val modifier: ClassModifier, val required: Boolean) : ConditionExpr
     data class BeMetaAnnotatedWith(val qualifiedName: String, val required: Boolean) : ConditionExpr
     data class BeAssignableTo(val qualifiedName: String) : ConditionExpr
+    data class AccessField(val ownerQualifiedName: String, val fieldName: String) : ConditionExpr
+    data class CallMethod(
+        val ownerQualifiedName: String,
+        val methodName: String,
+        val parameterTypeQualifiedNames: List<String>,
+    ) : ConditionExpr
     data class And(val left: ConditionExpr, val right: ConditionExpr) : ConditionExpr
+    data class Or(val left: ConditionExpr, val right: ConditionExpr) : ConditionExpr
 }
 
 /**

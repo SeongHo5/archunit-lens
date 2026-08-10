@@ -6,6 +6,7 @@ import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.inspections.quickfix.AppendClassSuffixQuickFix
 import io.github.archunitlens.inspections.quickfix.GoToArchRuleQuickFix
 import io.github.archunitlens.inspections.quickfix.RemoveAnnotationQuickFix
+import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.LiveArchRule
 import io.github.archunitlens.rules.evaluator.ClassConditionViolation
 import io.github.archunitlens.rules.evaluator.MemberConditionViolation
@@ -50,6 +51,16 @@ internal sealed interface ArchUnitViolation {
         val detail: ClassConditionViolation,
     ) : ArchUnitViolation
 
+    data class ForbiddenFieldAccess(
+        override val rule: LiveArchRule,
+        val condition: ConditionExpr.AccessField,
+    ) : ArchUnitViolation
+
+    data class ForbiddenMethodCall(
+        override val rule: LiveArchRule,
+        val condition: ConditionExpr.CallMethod,
+    ) : ArchUnitViolation
+
     data class MemberConvention(
         override val rule: LiveArchRule,
         val detail: MemberConditionViolation,
@@ -72,6 +83,8 @@ internal fun ArchUnitViolation.quickFixes(): Array<LocalQuickFix> = when (this) 
     is ArchUnitViolation.MissingInterface -> navigationFixes()
     is ArchUnitViolation.MissingAssignableType -> navigationFixes()
     is ArchUnitViolation.ClassConvention -> navigationFixes()
+    is ArchUnitViolation.ForbiddenFieldAccess -> navigationFixes()
+    is ArchUnitViolation.ForbiddenMethodCall -> navigationFixes()
     is ArchUnitViolation.MemberConvention -> navigationFixes()
 }
 
@@ -94,6 +107,17 @@ private fun ArchUnitViolation.detailMessage(): String? = when (this) {
         forbiddenPackagePattern,
     )
     is ArchUnitViolation.ClassConvention -> detail.message()
+    is ArchUnitViolation.ForbiddenFieldAccess -> ArchUnitLensBundle.message(
+        "inspection.problem.fieldAccess",
+        condition.ownerQualifiedName,
+        condition.fieldName,
+    )
+    is ArchUnitViolation.ForbiddenMethodCall -> ArchUnitLensBundle.message(
+        "inspection.problem.methodCall",
+        condition.ownerQualifiedName,
+        condition.methodName,
+        condition.parameterTypeQualifiedNames.joinToString(),
+    )
     is ArchUnitViolation.MemberConvention -> detail.message()
     else -> null
 }

@@ -54,12 +54,15 @@ The initial live-warning subset includes:
 - left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
 - literal class and method meta-annotation rules, including direct and transitively composed annotations
+- exact `noClasses()` field accesses and zero-argument method calls, including bounded `orShould()` when every sibling is supported
 - positive method/constructor declaration conventions plus statically decidable `noFields()`/`noMethods()` rules for annotations, names, convenience modifiers, and supported declaring-class facts
 - `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
 
 ## Rule Overview
 
 Open **ArchUnit Lens** from the right tool window bar to review discovered rules. The overview shows supported and unsupported rule fields with filters, rule-name search, source navigation, current-file-only scope, subject/unsupported-reason grouping, reason text, scan metrics, package cache metrics, and indexing/stale fallback diagnostics.
+
+![Exact code-access rules in Rule Overview](docs/images/issue-49-exact-code-access-overview.png)
 
 ## Quick fixes
 
@@ -74,14 +77,15 @@ Dependency violations stay navigation/explanation-only; the plugin does not rewr
 
 ArchUnit Lens does not execute ArchUnit rules or user/project code. It intentionally does not support live warnings for:
 
-- custom `ArchCondition`, `DescribedPredicate`, helper methods, or lambdas
+- custom `ArchCondition`, `DescribedPredicate`, helper methods, or rule-side lambdas
 - method-style `@ArchTest` rules
 - Kotlin ArchUnit rule parsing or Kotlin target-source inspection
 - unused wildcard import statements without a resolved referenced class
 - unresolved dependency references; resolve failures intentionally produce no warning
 - arbitrary member rules beyond the documented positive and negative declaration subsets
-- body-level `callMethod(...)` and `accessField(...)` checks; the current decision is documented in [`docs/issue-25-code-access-decision.md`](docs/issue-25-code-access-decision.md)
-- positive/class condition `orShould()` (bounded negative `noFields()`/`noMethods()` condition trees are supported) and any boolean tree containing a custom, dynamic, helper-backed, or unresolved leaf
+- parameterized method/constructor access, access `Where` predicates, method references, call graphs, and bytecode analysis
+- positive/class condition `orShould()` outside the exact code-access subset (bounded negative `noFields()`/`noMethods()` condition trees are supported)
+- any condition tree containing a custom, dynamic, helper-backed (including lambda), unresolved, or otherwise unsupported sibling
 
 ## Settings
 

@@ -20,6 +20,14 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             "package com.example; public interface QueryMapper {}",
         )
         myFixture.addFileToProject(
+            "src/test/java/java/lang/Throwable.java",
+            "package java.lang; public class Throwable { public void printStackTrace() {} }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/System.java",
+            "package java.lang; public final class System { public static Object out; public static Object err; }",
+        )
+        myFixture.addFileToProject(
             "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
             "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL, STATIC }",
         )
@@ -972,6 +980,34 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertTrue(status.reason is UnsupportedReason.UnsupportedArgument)
     }
 
+    fun testParsesExactNoClassesCodeAccessRules() {
+        val callRule = parseSingleRule(
+            exactRule(
+                "noClasses().should().callMethod(java.lang.Throwable.class, \"printStackTrace\")",
+                "noClasses",
+            ),
+        ) as NoClassesCodeAccessRule
+        assertEquals(
+            ConditionExpr.CallMethod("java.lang.Throwable", "printStackTrace", emptyList()),
+            callRule.condition,
+        )
+
+        val fieldsRule = parseSingleRule(
+            exactRule(
+                "noClasses().should().accessField(java.lang.System.class, \"out\")" +
+                    ".orShould().accessField(java.lang.System.class, \"err\")",
+                "noClasses",
+            ),
+        ) as NoClassesCodeAccessRule
+        assertEquals(
+            ConditionExpr.Or(
+                ConditionExpr.AccessField("java.lang.System", "out"),
+                ConditionExpr.AccessField("java.lang.System", "err"),
+            ),
+            fieldsRule.condition,
+        )
+    }
+
     fun testParsesBoundedStaticClassFacts() {
         myFixture.addFileToProject(
             "src/test/java/com/example/Transactional.java",
@@ -1164,15 +1200,33 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         )
     }
 
-    fun testDeferredDeclarationAndCodeAccessRulesStayMetadataOnly() {
+    fun testUnsupportedDeclarationAndCodeAccessRulesStayMetadataOnly() {
         val rules = listOf(
             exactRule(
                 "classes().should().callMethod(java.lang.Throwable.class, \"printStackTrace\")",
                 "classes",
             ),
             exactRule(
-                "classes().should().accessField(java.lang.System.class, \"out\")",
-                "classes",
+                "noClasses().that().resideInAPackage(\"..service..\").should()" +
+                    ".accessField(java.lang.System.class, \"out\")",
+                "noClasses",
+            ),
+            exactRule(
+                "noClasses().should().accessField(java.lang.System.class, \"out\").orShould().bePublic()",
+                "noClasses",
+            ),
+            exactRule(
+                "noClasses().should().accessField(java.lang.System.class, \"out\")" +
+                    ".orShould((item, events) -> {})",
+                "noClasses",
+            ),
+            exactRule(
+                "noClasses().should().callMethod(java.lang.Throwable.class, \"printStackTrace\", String.class)",
+                "noClasses",
+            ),
+            exactRule(
+                "noClasses().should().accessField(com.example.Missing.class, \"out\")",
+                "noClasses",
             ),
             exactRule("methods().should().bePublic()", "methods"),
             exactRule("constructors().should().bePublic()", "constructors"),
@@ -1213,7 +1267,9 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             assertTrue("$family should have an argument-bearing owned call", argumentCallIndex >= 0)
             val wrongKindCalls = calls.toMutableList().also { wrongKind ->
                 wrongKind[argumentCallIndex] = wrongKind[argumentCallIndex].copy(
-                    arguments = listOf(RawArgument.Lambda(0)),
+                    arguments = wrongKind[argumentCallIndex].arguments.mapIndexed { argumentIndex, argument ->
+                        if (argumentIndex == 0) RawArgument.Lambda(0) else argument
+                    },
                 )
             }
             val unsupportedArgument = UnsupportedReason.UnsupportedArgument(calls[argumentCallIndex].name, 0, "lambda")
@@ -1420,6 +1476,10 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             "methods().that().areDeclaredInClassesThat().areInterfaces().should().notBeMetaAnnotatedWith(\"com.example.Proxy\")",
             "methods",
         ),
+        ExactHandlerFamily.CODE_ACCESS to exactRule(
+            "noClasses().should().callMethod(java.lang.Throwable.class, \"printStackTrace\")",
+            "noClasses",
+        ),
     )
 
     fun testParsesNegativeFieldRuleWithRootPolarity() {
@@ -1490,7 +1550,8 @@ class ArchRuleParserTest : BasePlatformTestCase() {
 
     private fun parseSingleRule(code: String): LiveArchRule {
         val source = findSingleSource(code)
-        return ArchRuleParser.discover(source)?.liveRule ?: error("Expected supported ArchUnit Lens rule")
+        val discovery = ArchRuleParser.discover(source)
+        return discovery?.liveRule ?: error("Expected supported ArchUnit Lens rule: ${discovery?.descriptor}")
     }
 
     private fun discoverSingleRule(code: String): DiscoveredArchRule {
