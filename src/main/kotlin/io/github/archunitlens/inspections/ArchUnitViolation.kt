@@ -105,6 +105,15 @@ private fun MemberConditionViolation.message(): String = when (this) {
         "inspection.problem.member.rawReturnType",
         qualifiedName,
     )
+    is MemberConditionViolation.MissingAnnotation -> ArchUnitLensBundle.message("inspection.problem.member.missingAnnotation", qualifiedName)
+    is MemberConditionViolation.ForbiddenAnnotation -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenAnnotation", qualifiedName)
+    is MemberConditionViolation.RequiredModifier -> ArchUnitLensBundle.message("inspection.problem.member.requiredModifier", modifier)
+    is MemberConditionViolation.ForbiddenModifier -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenModifier", modifier)
+    is MemberConditionViolation.RequiredName -> ArchUnitLensBundle.message("inspection.problem.member.requiredName", name)
+    is MemberConditionViolation.ForbiddenName -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenName", name)
+    is MemberConditionViolation.RequiredNamePattern -> ArchUnitLensBundle.message("inspection.problem.member.requiredNamePattern", pattern)
+    is MemberConditionViolation.ForbiddenNamePattern -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenNamePattern", pattern)
+    is MemberConditionViolation.ForbiddenCondition -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenCondition", description)
 }
 
 private fun ClassConditionViolation.message(): String = when (this) {

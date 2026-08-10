@@ -11,9 +11,11 @@ private val ARCHUNIT_SUBJECT_ENTRY_POINTS = setOf(
     "theClass",
     "members",
     "fields",
+    "noFields",
     "codeUnits",
     "constructors",
     "methods",
+    "noMethods",
 )
 
 internal enum class ExactHandlerFamily {
@@ -149,7 +151,7 @@ object ArchRuleParser {
         callsWithSource: List<Pair<RawCall, com.intellij.psi.PsiMethodCallExpression>>,
     ): ExactHandlerDecision = when (calls.firstOrNull()?.name) {
         "classes" -> parseClassConvention(source, calls, callsWithSource)
-        "methods", "constructors" -> parseMemberConvention(source, calls)
+        "noFields", "methods", "noMethods", "constructors" -> parseMemberConvention(source, calls)
         else -> ExactHandlerDecision.NotApplicable
     }
 
@@ -199,13 +201,22 @@ object ArchRuleParser {
             return ExactHandlerDecision.Unsupported(UnsupportedReason.UnsupportedOrAmbiguousRuleChain)
         }
         val subject = when (calls.first().name) {
-            "methods" -> MemberSubjectKind.Methods
+            "noFields" -> MemberSubjectKind.Fields
+            "methods", "noMethods" -> MemberSubjectKind.Methods
             "constructors" -> MemberSubjectKind.Constructors
             else -> return ExactHandlerDecision.NotApplicable
         }
+        val polarity = when (calls.first().name) {
+            "noFields", "noMethods" -> RulePolarity.NEGATIVE
+            else -> RulePolarity.POSITIVE
+        }
         val predicate = calls.take(shouldIndex).memberPredicate(source.initializer, subject)
             ?: return ExactHandlerDecision.Unsupported(calls.memberFallbackReason(source.initializer))
-        val condition = calls.drop(shouldIndex + 1).withoutTrailingBecauseCall().memberCondition(source.initializer, subject)
+        val condition = calls.drop(shouldIndex + 1).withoutTrailingBecauseCall().memberCondition(
+            source.initializer,
+            subject,
+            polarity,
+        )
             ?: return ExactHandlerDecision.Unsupported(calls.memberFallbackReason(source.initializer))
         return ExactHandlerDecision.Matched(
             MemberConventionRule(
@@ -213,6 +224,7 @@ object ArchRuleParser {
                 subject = subject,
                 predicate = predicate,
                 condition = condition,
+                polarity = polarity,
                 sourcePointer = source.fieldPointer,
                 analyzeScope = source.analyzeScope,
                 reason = calls.reason(),
@@ -477,17 +489,23 @@ object ArchRuleParser {
     private fun List<RawCall>.validateStaticArguments(): UnsupportedReason? {
         for (call in this) {
             val expectation = when (call.name) {
-                "classes", "noClasses", "methods", "constructors", "that", "should", "andShould", "dependOnClassesThat",
+                "classes", "noClasses", "fields", "noFields", "methods", "noMethods", "constructors",
+                "that", "should", "andShould", "orShould", "dependOnClassesThat",
                 "and", "or", "areInterfaces", "areNotInterfaces", "areEnums", "areNotEnums",
                 "areRecords", "areNotRecords", "beInterfaces", "notBeInterfaces", "beEnums", "notBeEnums",
-                "beRecords", "notBeRecords", "areDeclaredInClassesThat", "bePrivate", "beStatic",
+                "beRecords", "notBeRecords", "areDeclaredInClassesThat",
+                "bePrivate", "notBePrivate", "bePublic", "notBePublic", "beProtected", "notBeProtected",
+                "bePackagePrivate", "notBePackagePrivate", "beStatic", "notBeStatic", "beFinal", "notBeFinal",
                 -> ArgumentExpectation.None
                 "resideInAnyPackage" -> ArgumentExpectation.Strings(minimum = 1)
-                "resideInAPackage", "haveSimpleNameEndingWith", "haveSimpleNameNotEndingWith", "because" ->
+                "resideInAPackage", "haveSimpleNameEndingWith", "haveSimpleNameNotEndingWith", "because",
+                "haveName", "notHaveName", "haveNameMatching", "notHaveNameMatching",
+                ->
                     ArgumentExpectation.Strings(exact = 1)
                 "areAnnotatedWith", "areNotAnnotatedWith", "beAnnotatedWith", "notBeAnnotatedWith",
                 "areMetaAnnotatedWith", "areNotMetaAnnotatedWith", "beMetaAnnotatedWith", "notBeMetaAnnotatedWith",
-                "beAssignableTo", "haveRawReturnType",
+                "beAssignableTo",
+                "areAssignableTo", "areNotAssignableTo", "implement", "doNotImplement", "haveRawReturnType",
                 ->
                     ArgumentExpectation.Annotation
                 else -> continue
@@ -745,7 +763,7 @@ object ArchRuleParser {
         context: PsiExpression,
         subject: MemberSubjectKind,
     ): MemberPredicateExpr? {
-        if (firstOrNull()?.name !in setOf("methods", "constructors")) return null
+        if (firstOrNull()?.name !in setOf("noFields", "methods", "noMethods", "constructors")) return null
         if (size == 1) return MemberPredicateExpr.All
         if (getOrNull(1)?.name != "that") return null
         val predicateCalls = drop(2)
@@ -773,7 +791,7 @@ object ArchRuleParser {
                 index += 1
             } else {
                 if (encounteredDeclaringClass) return null
-                if (subject != MemberSubjectKind.Methods) return null
+                if (subject == MemberSubjectKind.Constructors) return null
                 leaf = call.memberPredicateLeaf(context) ?: return null
             }
             expression = expression.appendMemberPredicate(leaf, pendingOperator)
@@ -792,6 +810,9 @@ object ArchRuleParser {
     private fun RawCall.memberDeclaringClassPredicateLeaf(context: PsiExpression): PredicateExpr? = when (name) {
         "areAnnotatedWith" -> staticallyResolvableType(context)?.let(PredicateExpr::AreAnnotatedWith)
         "areNotAnnotatedWith" -> staticallyResolvableType(context)?.let(PredicateExpr::AreNotAnnotatedWith)
+        "areMetaAnnotatedWith" -> staticallyResolvableType(context)?.let { PredicateExpr.AreMetaAnnotatedWith(it, true) }
+        "areAssignableTo" -> staticallyResolvableType(context)?.let { PredicateExpr.AreAssignableTo(it, true) }
+        "implement" -> staticallyResolvableType(context)?.let { PredicateExpr.Implement(it, true) }
         "resideInAPackage", "resideInAnyPackage" -> supportedPackagePatterns()?.let(PredicateExpr::ResideInPackages)
         "haveSimpleNameEndingWith" -> stringArgs.singleOrNull()?.let(PredicateExpr::HaveSimpleNameEndingWith)
         "haveSimpleNameNotEndingWith" -> stringArgs.singleOrNull()?.let(PredicateExpr::HaveSimpleNameNotEndingWith)
@@ -814,18 +835,25 @@ object ArchRuleParser {
     private fun List<RawCall>.memberCondition(
         context: PsiExpression,
         subject: MemberSubjectKind,
+        polarity: RulePolarity,
     ): MemberConditionExpr? {
         if (isEmpty()) return null
         var expression: MemberConditionExpr? = null
         var expectsCondition = true
+        var pendingOperator: String? = null
         forEach { call ->
-            if (call.name == "andShould") {
+            if (call.name == "andShould" || call.name == "orShould") {
+                if (call.name == "orShould" && polarity != RulePolarity.NEGATIVE) return null
                 if (expectsCondition || expression == null) return null
+                pendingOperator = call.name
                 expectsCondition = true
             } else {
                 if (!expectsCondition) return null
-                val leaf = call.memberConditionLeaf(context, subject) ?: return null
-                expression = expression?.let { MemberConditionExpr.And(it, leaf) } ?: leaf
+                val leaf = call.memberConditionLeaf(context, subject, polarity) ?: return null
+                expression = expression?.let {
+                    if (pendingOperator == "orShould") MemberConditionExpr.Or(it, leaf) else MemberConditionExpr.And(it, leaf)
+                } ?: leaf
+                pendingOperator = null
                 expectsCondition = false
             }
         }
@@ -835,14 +863,39 @@ object ArchRuleParser {
     private fun RawCall.memberConditionLeaf(
         context: PsiExpression,
         subject: MemberSubjectKind,
+        polarity: RulePolarity,
     ): MemberConditionExpr? = when (name) {
-        "bePrivate" -> MemberConditionExpr.BePrivate.takeIf { subject == MemberSubjectKind.Constructors }
-        "beStatic" -> MemberConditionExpr.BeStatic.takeIf { subject == MemberSubjectKind.Methods }
+        "bePrivate" -> if (subject == MemberSubjectKind.Constructors) {
+            MemberConditionExpr.BePrivate
+        } else {
+            MemberConditionExpr.HaveModifier("private", true).takeIf { polarity == RulePolarity.NEGATIVE }
+        }
+        "notBePrivate" -> MemberConditionExpr.HaveModifier("private", false).takeIf { polarity == RulePolarity.NEGATIVE }
+        "bePublic" -> MemberConditionExpr.HaveModifier("public", true).takeIf { polarity == RulePolarity.NEGATIVE }
+        "notBePublic" -> MemberConditionExpr.HaveModifier("public", false).takeIf { polarity == RulePolarity.NEGATIVE }
+        "beProtected" -> MemberConditionExpr.HaveModifier("protected", true).takeIf { polarity == RulePolarity.NEGATIVE }
+        "notBeProtected" -> MemberConditionExpr.HaveModifier("protected", false).takeIf { polarity == RulePolarity.NEGATIVE }
+        "bePackagePrivate" -> MemberConditionExpr.HaveModifier("package-private", true).takeIf { polarity == RulePolarity.NEGATIVE }
+        "notBePackagePrivate" -> MemberConditionExpr.HaveModifier("package-private", false).takeIf { polarity == RulePolarity.NEGATIVE }
+        "beStatic" -> if (subject == MemberSubjectKind.Methods) MemberConditionExpr.BeStatic else MemberConditionExpr.HaveModifier("static", true).takeIf { subject == MemberSubjectKind.Fields }
+        "notBeStatic" -> MemberConditionExpr.HaveModifier("static", false).takeIf { polarity == RulePolarity.NEGATIVE }
+        "beFinal" -> MemberConditionExpr.HaveModifier("final", true).takeIf { polarity == RulePolarity.NEGATIVE }
+        "notBeFinal" -> MemberConditionExpr.HaveModifier("final", false).takeIf { polarity == RulePolarity.NEGATIVE }
+        "beAnnotatedWith" -> staticallyResolvableType(context)?.let { MemberConditionExpr.BeAnnotatedWith(it, false, true) }.takeIf { polarity == RulePolarity.NEGATIVE }
+        "notBeAnnotatedWith" -> staticallyResolvableType(context)?.let { MemberConditionExpr.BeAnnotatedWith(it, false, false) }.takeIf { polarity == RulePolarity.NEGATIVE }
+        "beMetaAnnotatedWith" -> staticallyResolvableType(context)?.let { MemberConditionExpr.BeAnnotatedWith(it, true, true) }.takeIf { polarity == RulePolarity.NEGATIVE }
+        "notBeMetaAnnotatedWith" -> staticallyResolvableType(context)?.let { MemberConditionExpr.BeAnnotatedWith(it, true, false) }.takeIf { polarity == RulePolarity.NEGATIVE }
+        "haveName" -> stringArgs.singleOrNull()?.let { MemberConditionExpr.HaveName(it, true) }.takeIf { polarity == RulePolarity.NEGATIVE }
+        "notHaveName" -> stringArgs.singleOrNull()?.let { MemberConditionExpr.HaveName(it, false) }.takeIf { polarity == RulePolarity.NEGATIVE }
+        "haveNameMatching" -> stringArgs.singleOrNull()?.takeIf(::isValidRegex)?.let { MemberConditionExpr.HaveNameMatching(it, true) }.takeIf { polarity == RulePolarity.NEGATIVE }
+        "notHaveNameMatching" -> stringArgs.singleOrNull()?.takeIf(::isValidRegex)?.let { MemberConditionExpr.HaveNameMatching(it, false) }.takeIf { polarity == RulePolarity.NEGATIVE }
         "haveRawReturnType" -> staticallyResolvableType(context)
             ?.takeIf { subject == MemberSubjectKind.Methods }
             ?.let(MemberConditionExpr::HaveRawReturnType)
         else -> null
     }
+
+    private fun isValidRegex(pattern: String): Boolean = runCatching { Regex(pattern) }.isSuccess
 
     private fun RawCall.staticQualifiedType(context: PsiExpression): String? = stringArgs.singleOrNull()?.takeIf { it.contains('.') }
         ?: arguments.singleOrNull()
@@ -914,7 +967,11 @@ object ArchRuleParser {
 
     private fun List<RawCall>.memberFallbackReason(context: PsiExpression): UnsupportedReason {
         val typeCall = firstOrNull {
-            it.name in setOf("areAnnotatedWith", "areMetaAnnotatedWith", "haveRawReturnType") &&
+            it.name in setOf(
+                "areAnnotatedWith", "areMetaAnnotatedWith", "areNotAnnotatedWith", "areNotMetaAnnotatedWith",
+                "beAnnotatedWith", "notBeAnnotatedWith", "beMetaAnnotatedWith", "notBeMetaAnnotatedWith",
+                "areAssignableTo", "areNotAssignableTo", "implement", "doNotImplement", "haveRawReturnType",
+            ) &&
                 it.staticQualifiedType(context) == null
         }
         if (typeCall != null) {
@@ -949,6 +1006,7 @@ object ArchRuleParser {
         condition = condition,
         reason = calls.reason(),
         supportStatus = SupportStatus.Unsupported(reason),
+        polarity = calls.rootPolarity(),
     )
 
     private fun LiveArchRule.toDescriptor(
@@ -973,6 +1031,7 @@ object ArchRuleParser {
             condition = ConditionExpr.Leaf("dependOnClassesThat.resideInPackages(${forbiddenPackagePatterns.joinToString()})"),
             reason = reason,
             supportStatus = SupportStatus.Supported,
+            polarity = calls.rootPolarity(),
         )
         is ClassNameSuffixRule -> RuleDescriptor(
             subject = SubjectKind.Classes,
@@ -991,6 +1050,7 @@ object ArchRuleParser {
             condition = ConditionExpr.Leaf("beAnnotatedWith($forbiddenAnnotationQualifiedName)"),
             reason = reason,
             supportStatus = SupportStatus.Supported,
+            polarity = calls.rootPolarity(),
         )
         is AnnotationExclusivityRule -> RuleDescriptor(
             subject = SubjectKind.Classes,
@@ -1033,6 +1093,7 @@ object ArchRuleParser {
         )
         is MemberConventionRule -> RuleDescriptor(
             subject = when (subject) {
+                MemberSubjectKind.Fields -> SubjectKind.Fields
                 MemberSubjectKind.Methods -> SubjectKind.Methods
                 MemberSubjectKind.Constructors -> SubjectKind.Constructors
             },
@@ -1042,7 +1103,14 @@ object ArchRuleParser {
             condition = ConditionExpr.Leaf(condition.display()),
             reason = reason,
             supportStatus = SupportStatus.Supported,
+            polarity = polarity,
         )
+    }
+
+    private fun List<RawCall>.rootPolarity(): RulePolarity = if (firstOrNull()?.name in setOf("noClasses", "noFields", "noMethods")) {
+        RulePolarity.NEGATIVE
+    } else {
+        RulePolarity.POSITIVE
     }
 
     private fun MemberPredicateExpr.display(): String = when (this) {
@@ -1060,7 +1128,12 @@ object ArchRuleParser {
         MemberConditionExpr.BePrivate -> "bePrivate"
         MemberConditionExpr.BeStatic -> "beStatic"
         is MemberConditionExpr.HaveRawReturnType -> "haveRawReturnType($qualifiedName)"
+        is MemberConditionExpr.BeAnnotatedWith -> "${if (required) "be" else "notBe"}${if (metaAnnotated) "Meta" else ""}AnnotatedWith($qualifiedName)"
+        is MemberConditionExpr.HaveModifier -> "${if (required) "be" else "notBe"}${modifier.replaceFirstChar(Char::uppercase)}"
+        is MemberConditionExpr.HaveName -> "${if (required) "haveName" else "notHaveName"}($name)"
+        is MemberConditionExpr.HaveNameMatching -> "${if (required) "haveNameMatching" else "notHaveNameMatching"}($pattern)"
         is MemberConditionExpr.And -> "(${left.display()} AND ${right.display()})"
+        is MemberConditionExpr.Or -> "(${left.display()} OR ${right.display()})"
     }
 
     private fun PredicateExpr.display(): String = when (this) {
@@ -1068,15 +1141,15 @@ object ArchRuleParser {
         is PredicateExpr.Leaf -> predicate
         is PredicateExpr.AreAnnotatedWith -> "areAnnotatedWith($qualifiedName)"
         is PredicateExpr.AreNotAnnotatedWith -> "areNotAnnotatedWith($qualifiedName)"
+        is PredicateExpr.AreMetaAnnotatedWith -> "${if (expected) "are" else "areNot"}MetaAnnotatedWith($qualifiedName)"
+        is PredicateExpr.AreAssignableTo -> "${if (expected) "are" else "areNot"}AssignableTo($qualifiedName)"
+        is PredicateExpr.Implement -> "${if (expected) "implement" else "doNotImplement"}($qualifiedName)"
         is PredicateExpr.ResideInPackages -> "resideInPackages(${patterns.joinToString()})"
         is PredicateExpr.HaveSimpleNameEndingWith -> "haveSimpleNameEndingWith($suffix)"
         is PredicateExpr.HaveSimpleNameNotEndingWith -> "haveSimpleNameNotEndingWith($suffix)"
         is PredicateExpr.AreInterfaces -> if (expected) "areInterfaces" else "areNotInterfaces"
         is PredicateExpr.AreEnums -> if (expected) "areEnums" else "areNotEnums"
         is PredicateExpr.AreRecords -> if (expected) "areRecords" else "areNotRecords"
-        is PredicateExpr.AreMetaAnnotatedWith -> {
-            if (expected) "areMetaAnnotatedWith($qualifiedName)" else "areNotMetaAnnotatedWith($qualifiedName)"
-        }
         is PredicateExpr.And -> "(${left.display()} AND ${right.display()})"
         is PredicateExpr.Or -> "(${left.display()} OR ${right.display()})"
     }
@@ -1085,10 +1158,10 @@ object ArchRuleParser {
         "classes", "noClasses" -> SubjectKind.Classes
         "theClass" -> SubjectKind.SingleClass
         "members" -> SubjectKind.Members
-        "fields" -> SubjectKind.Fields
+        "fields", "noFields" -> SubjectKind.Fields
         "codeUnits" -> SubjectKind.CodeUnits
         "constructors" -> SubjectKind.Constructors
-        "methods" -> SubjectKind.Methods
+        "methods", "noMethods" -> SubjectKind.Methods
         else -> SubjectKind.CustomTransformer(firstOrNull()?.name)
     }
 

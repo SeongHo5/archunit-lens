@@ -125,6 +125,7 @@ data class MemberConventionRule(
     val subject: MemberSubjectKind,
     val predicate: MemberPredicateExpr,
     val condition: MemberConditionExpr,
+    val polarity: RulePolarity = RulePolarity.POSITIVE,
     override val sourcePointer: SmartPsiElementPointer<out PsiElement>,
     override val analyzeScope: AnalyzeScope = AnalyzeScope.All,
     override val reason: String? = null,

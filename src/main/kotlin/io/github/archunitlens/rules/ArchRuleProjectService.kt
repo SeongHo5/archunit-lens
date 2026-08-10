@@ -378,6 +378,10 @@ private fun PsiJavaFile.requiresTypeResolution(): Boolean {
         methodCalls.any { call ->
             call.methodExpression.referenceName in setOf(
                 "beAssignableTo",
+                "areAssignableTo",
+                "areNotAssignableTo",
+                "implement",
+                "doNotImplement",
                 "areMetaAnnotatedWith",
                 "areNotMetaAnnotatedWith",
                 "beMetaAnnotatedWith",
@@ -394,13 +398,20 @@ private fun PsiJavaFile.requiresTypeResolution(): Boolean {
     ) {
         return true
     }
-    val hasMemberEntryPoint = methodCalls.any { it.methodExpression.referenceName in setOf("methods", "constructors") }
+    val hasMemberEntryPoint = methodCalls.any {
+        it.methodExpression.referenceName in setOf("noFields", "methods", "noMethods", "constructors")
+    }
     return hasMemberEntryPoint &&
         methodCalls.any {
             it.methodExpression.referenceName in setOf(
                 "areAnnotatedWith",
                 "areNotAnnotatedWith",
                 "areMetaAnnotatedWith",
+                "areNotMetaAnnotatedWith",
+                "beAnnotatedWith",
+                "notBeAnnotatedWith",
+                "beMetaAnnotatedWith",
+                "notBeMetaAnnotatedWith",
                 "haveRawReturnType",
             )
         }

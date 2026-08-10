@@ -7,6 +7,7 @@ import io.github.archunitlens.rules.ArchRuleScanMetrics
 import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.DiscoveredArchRule
 import io.github.archunitlens.rules.PredicateExpr
+import io.github.archunitlens.rules.RulePolarity
 import io.github.archunitlens.rules.SubjectKind
 import io.github.archunitlens.rules.SupportStatus
 import io.github.archunitlens.rules.UnsupportedReason
@@ -135,6 +136,7 @@ internal object ArchUnitLensRuleOverviewFormatter {
         appendLine(ArchUnitLensBundle.message("overview.rule.index", index, discovery.ruleName))
         appendLine(indented("overview.status", descriptor.supportStatus.label()))
         appendLine(indented("overview.subject", descriptor.subject.label()))
+        appendLine(indented("overview.polarity", descriptor.polarity.label()))
         appendLine(indented("overview.scope", descriptor.scope.label()))
         appendLine(indented("overview.predicate", descriptor.predicate.display()))
         appendLine(indented("overview.condition", descriptor.condition.display()))
@@ -164,6 +166,7 @@ internal object ArchUnitLensRuleOverviewFormatter {
         val haystack = listOfNotNull(
             ruleName,
             descriptor.subject.label(),
+            descriptor.polarity.label(),
             descriptor.scope.label(),
             descriptor.predicate.toString(),
             descriptor.condition.toString(),
@@ -201,6 +204,11 @@ internal object ArchUnitLensRuleOverviewFormatter {
     private fun AnalyzeScope.label(): String = when (this) {
         AnalyzeScope.All -> ArchUnitLensBundle.message("overview.scope.all")
         is AnalyzeScope.Packages -> ArchUnitLensBundle.message("overview.scope.packages", packageNames.joinToString(separator = ","))
+    }
+
+    private fun RulePolarity.label(): String = when (this) {
+        RulePolarity.POSITIVE -> ArchUnitLensBundle.message("overview.polarity.positive")
+        RulePolarity.NEGATIVE -> ArchUnitLensBundle.message("overview.polarity.negative")
     }
 
     private fun ArchRuleIndexingStatus.label(): String = when (this) {
@@ -250,17 +258,15 @@ internal object ArchUnitLensRuleOverviewFormatter {
         is PredicateExpr.Leaf -> predicate
         is PredicateExpr.AreAnnotatedWith -> "areAnnotatedWith($qualifiedName)"
         is PredicateExpr.AreNotAnnotatedWith -> "areNotAnnotatedWith($qualifiedName)"
+        is PredicateExpr.AreMetaAnnotatedWith -> "${if (expected) "are" else "areNot"}MetaAnnotatedWith($qualifiedName)"
+        is PredicateExpr.AreAssignableTo -> "${if (expected) "are" else "areNot"}AssignableTo($qualifiedName)"
+        is PredicateExpr.Implement -> "${if (expected) "implement" else "doNotImplement"}($qualifiedName)"
         is PredicateExpr.ResideInPackages -> "resideInPackages(${patterns.joinToString()})"
         is PredicateExpr.HaveSimpleNameEndingWith -> "haveSimpleNameEndingWith($suffix)"
         is PredicateExpr.HaveSimpleNameNotEndingWith -> "haveSimpleNameNotEndingWith($suffix)"
         is PredicateExpr.AreInterfaces -> if (expected) "areInterfaces" else "areNotInterfaces"
         is PredicateExpr.AreEnums -> if (expected) "areEnums" else "areNotEnums"
         is PredicateExpr.AreRecords -> if (expected) "areRecords" else "areNotRecords"
-        is PredicateExpr.AreMetaAnnotatedWith -> if (expected) {
-            "areMetaAnnotatedWith($qualifiedName)"
-        } else {
-            "areNotMetaAnnotatedWith($qualifiedName)"
-        }
         is PredicateExpr.And -> "(${left.display()} AND ${right.display()})"
         is PredicateExpr.Or -> "(${left.display()} OR ${right.display()})"
     }

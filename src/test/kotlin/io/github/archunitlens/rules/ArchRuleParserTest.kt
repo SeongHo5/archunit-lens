@@ -23,6 +23,14 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
             "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL, STATIC }",
         )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Value.java",
+            "package com.example; public @interface Value {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/QueryModel.java",
+            "package com.example; public interface QueryModel {}",
+        )
     }
 
     fun testParsesPackageDependencyBanRule() {
@@ -1305,6 +1313,8 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         val staticMethodRule = discoveries.getValue("utility_methods_are_static").liveRule as? MemberConventionRule
         assertEquals(MemberSubjectKind.Methods, staticMethodRule?.subject)
         assertEquals(MemberConditionExpr.BeStatic, staticMethodRule?.condition)
+        assertEquals(RulePolarity.POSITIVE, staticMethodRule?.polarity)
+        assertEquals(RulePolarity.POSITIVE, discoveries.getValue("utility_methods_are_static").descriptor.polarity)
 
         val returnTypeRule = discoveries.getValue("controller_mappings_return_response_entity").liveRule as? MemberConventionRule
         assertEquals(
@@ -1411,6 +1421,38 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             "methods",
         ),
     )
+
+    fun testParsesNegativeFieldRuleWithRootPolarity() {
+        val rule = parseSingleRule(
+            exactRule("noFields().should().beAnnotatedWith(com.example.Value.class)", "noFields"),
+        ) as MemberConventionRule
+
+        assertEquals(MemberSubjectKind.Fields, rule.subject)
+        assertEquals(RulePolarity.NEGATIVE, rule.polarity)
+        assertEquals(MemberConditionExpr.BeAnnotatedWith("com.example.Value", false, true), rule.condition)
+    }
+
+    fun testParsesNegativeMethodDeclaringClassAndOrConditionTree() {
+        val rule = parseSingleRule(
+            exactRule(
+                "noMethods().that().areDeclaredInClassesThat().implement(com.example.QueryModel.class)" +
+                    ".should().haveNameMatching(\"^set[A-Z].*\").orShould().beStatic()",
+                "noMethods",
+            ),
+        ) as MemberConventionRule
+
+        assertEquals(MemberSubjectKind.Methods, rule.subject)
+        assertEquals(RulePolarity.NEGATIVE, rule.polarity)
+        assertTrue(rule.predicate is MemberPredicateExpr.DeclaredInClasses)
+        assertTrue(rule.condition is MemberConditionExpr.Or)
+    }
+
+    fun testMalformedNegativeMemberRuleIsMetadataOnly() {
+        val discovery = discoverSingleRule(exactRule("noFields().should().haveNameMatching(\"[\")", "noFields"))
+
+        assertNull(discovery.liveRule)
+        assertEquals(RulePolarity.NEGATIVE, discovery.descriptor.polarity)
+    }
 
     private fun ExactHandlerFamily.expectedExactReason(reason: UnsupportedReason): UnsupportedReason {
         val metaAnnotationFamily = this == ExactHandlerFamily.CLASS_META_ANNOTATION ||

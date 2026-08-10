@@ -9,12 +9,14 @@ The canonical support contract lives in <code>docs/rule-support-matrix.md</code>
 families include package dependency bans for explicit imports and resolved Java references, class suffix rules, forbidden annotations,
 annotation exclusivity, typed class conventions over annotation/meta-annotation/package/suffix/interface/enum/record/final-modifier facts, QueryMapper-style interface rules,
 literal class/method meta-annotation rules, and positive method/constructor declaration conventions for private constructors,
-static methods, and resolved exact raw return types. Class predicate <code>and()</code>/<code>or()</code> and condition
+static methods, and resolved exact raw return types, plus statically decidable negative
+<code>noFields()</code>/<code>noMethods()</code> annotation, name, modifier, and declaring-class rules. Negative polarity is applied once
+to the complete supported condition tree. Class predicate <code>and()</code>/<code>or()</code> and condition
 <code>andShould()</code> are live only when every leaf is statically supported.
 </p>
 <p>
 Unsupported, custom, or ambiguous helper-based rules are retained as Rule Overview metadata when possible
-but do not produce warnings. Unsupported method/constructor declarations, <code>callMethod(...)</code>, <code>accessField(...)</code>,
+but do not produce warnings. Unsupported field/method/constructor declarations, <code>callMethod(...)</code>, <code>accessField(...)</code>,
 and unsupported siblings remain metadata-only. Open the ArchUnit Lens tool window to review supported and unsupported
 discovered rules, scopes, reasons, unsupported reasons, and scan metrics.
 </p>
