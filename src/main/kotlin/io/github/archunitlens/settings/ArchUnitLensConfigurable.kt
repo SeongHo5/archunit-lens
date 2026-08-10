@@ -21,6 +21,7 @@ class ArchUnitLensConfigurable : Configurable {
     private lateinit var dependencyRules: JCheckBox
     private lateinit var annotationRules: JCheckBox
     private lateinit var interfaceRules: JCheckBox
+    private lateinit var memberDeclarationRules: JCheckBox
     private lateinit var showSupported: JCheckBox
     private lateinit var showUnsupported: JCheckBox
     private lateinit var showDiagnostics: JCheckBox
@@ -43,6 +44,7 @@ class ArchUnitLensConfigurable : Configurable {
         dependencyRules = JCheckBox(ArchUnitLensBundle.message("settings.ruleFamily.dependencies"))
         annotationRules = JCheckBox(ArchUnitLensBundle.message("settings.ruleFamily.annotations"))
         interfaceRules = JCheckBox(ArchUnitLensBundle.message("settings.ruleFamily.interfaces"))
+        memberDeclarationRules = JCheckBox(ArchUnitLensBundle.message("settings.ruleFamily.memberDeclarations"))
         showSupported = JCheckBox(ArchUnitLensBundle.message("settings.overview.showSupported"))
         showUnsupported = JCheckBox(ArchUnitLensBundle.message("settings.overview.showUnsupported"))
         showDiagnostics = JCheckBox(ArchUnitLensBundle.message("settings.overview.showDiagnostics"))
@@ -55,6 +57,7 @@ class ArchUnitLensConfigurable : Configurable {
             dependencyRules,
             annotationRules,
             interfaceRules,
+            memberDeclarationRules,
             JLabel(ArchUnitLensBundle.message("settings.section.overview")),
             showSupported,
             showUnsupported,
@@ -78,6 +81,7 @@ class ArchUnitLensConfigurable : Configurable {
             dependencyRules.isSelected != state.dependencyRulesEnabled ||
             annotationRules.isSelected != state.annotationRulesEnabled ||
             interfaceRules.isSelected != state.interfaceRulesEnabled ||
+            memberDeclarationRules.isSelected != state.memberDeclarationRulesEnabled ||
             showSupported.isSelected != state.showSupportedRulesInOverview ||
             showUnsupported.isSelected != state.showUnsupportedRulesInOverview ||
             showDiagnostics.isSelected != state.showDiagnosticsInOverview ||
@@ -91,6 +95,7 @@ class ArchUnitLensConfigurable : Configurable {
         state.dependencyRulesEnabled = dependencyRules.isSelected
         state.annotationRulesEnabled = annotationRules.isSelected
         state.interfaceRulesEnabled = interfaceRules.isSelected
+        state.memberDeclarationRulesEnabled = memberDeclarationRules.isSelected
         state.showSupportedRulesInOverview = showSupported.isSelected
         state.showUnsupportedRulesInOverview = showUnsupported.isSelected
         state.showDiagnosticsInOverview = showDiagnostics.isSelected
@@ -104,6 +109,7 @@ class ArchUnitLensConfigurable : Configurable {
         dependencyRules.isSelected = state.dependencyRulesEnabled
         annotationRules.isSelected = state.annotationRulesEnabled
         interfaceRules.isSelected = state.interfaceRulesEnabled
+        memberDeclarationRules.isSelected = state.memberDeclarationRulesEnabled
         showSupported.isSelected = state.showSupportedRulesInOverview
         showUnsupported.isSelected = state.showUnsupportedRulesInOverview
         showDiagnostics.isSelected = state.showDiagnosticsInOverview

@@ -9,6 +9,7 @@ import io.github.archunitlens.inspections.quickfix.RemoveAnnotationQuickFix
 import io.github.archunitlens.rules.ConditionExpr
 import io.github.archunitlens.rules.LiveArchRule
 import io.github.archunitlens.rules.evaluator.ClassConditionViolation
+import io.github.archunitlens.rules.evaluator.MemberConditionViolation
 
 /**
  * Semantic reason why a supported ArchUnit rule was violated.
@@ -64,6 +65,11 @@ internal sealed interface ArchUnitViolation {
         override val rule: LiveArchRule,
         val condition: ConditionExpr.CallConstructor,
     ) : ArchUnitViolation
+
+    data class MemberConvention(
+        override val rule: LiveArchRule,
+        val detail: MemberConditionViolation,
+    ) : ArchUnitViolation
 }
 
 /**
@@ -85,6 +91,7 @@ internal fun ArchUnitViolation.quickFixes(): Array<LocalQuickFix> = when (this) 
     is ArchUnitViolation.ForbiddenFieldAccess -> navigationFixes()
     is ArchUnitViolation.ForbiddenMethodCall -> navigationFixes()
     is ArchUnitViolation.ForbiddenConstructorCall -> navigationFixes()
+    is ArchUnitViolation.MemberConvention -> navigationFixes()
 }
 
 @InspectionMessage
@@ -122,7 +129,26 @@ private fun ArchUnitViolation.detailMessage(): String? = when (this) {
         condition.ownerQualifiedName,
         condition.parameterTypeQualifiedNames.joinToString(),
     )
+    is ArchUnitViolation.MemberConvention -> detail.message()
     else -> null
+}
+
+private fun MemberConditionViolation.message(): String = when (this) {
+    MemberConditionViolation.MustBePrivate -> ArchUnitLensBundle.message("inspection.problem.member.mustBePrivate")
+    MemberConditionViolation.MustBeStatic -> ArchUnitLensBundle.message("inspection.problem.member.mustBeStatic")
+    is MemberConditionViolation.WrongRawReturnType -> ArchUnitLensBundle.message(
+        "inspection.problem.member.rawReturnType",
+        qualifiedName,
+    )
+    is MemberConditionViolation.MissingAnnotation -> ArchUnitLensBundle.message("inspection.problem.member.missingAnnotation", qualifiedName)
+    is MemberConditionViolation.ForbiddenAnnotation -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenAnnotation", qualifiedName)
+    is MemberConditionViolation.RequiredModifier -> ArchUnitLensBundle.message("inspection.problem.member.requiredModifier", modifier)
+    is MemberConditionViolation.ForbiddenModifier -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenModifier", modifier)
+    is MemberConditionViolation.RequiredName -> ArchUnitLensBundle.message("inspection.problem.member.requiredName", name)
+    is MemberConditionViolation.ForbiddenName -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenName", name)
+    is MemberConditionViolation.RequiredNamePattern -> ArchUnitLensBundle.message("inspection.problem.member.requiredNamePattern", pattern)
+    is MemberConditionViolation.ForbiddenNamePattern -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenNamePattern", pattern)
+    is MemberConditionViolation.ForbiddenCondition -> ArchUnitLensBundle.message("inspection.problem.member.forbiddenCondition", description)
 }
 
 private fun ClassConditionViolation.message(): String = when (this) {
@@ -138,5 +164,17 @@ private fun ClassConditionViolation.message(): String = when (this) {
     ClassConditionViolation.MustNotBeInterface -> ArchUnitLensBundle.message("inspection.problem.class.mustNotBeInterface")
     ClassConditionViolation.MustBeEnum -> ArchUnitLensBundle.message("inspection.problem.class.mustBeEnum")
     ClassConditionViolation.MustNotBeEnum -> ArchUnitLensBundle.message("inspection.problem.class.mustNotBeEnum")
+    ClassConditionViolation.MustBeRecord -> ArchUnitLensBundle.message("inspection.problem.class.mustBeRecord")
+    ClassConditionViolation.MustNotBeRecord -> ArchUnitLensBundle.message("inspection.problem.class.mustNotBeRecord")
+    is ClassConditionViolation.MissingModifier -> ArchUnitLensBundle.message("inspection.problem.class.missingModifier", modifier.name)
+    is ClassConditionViolation.ForbiddenModifier -> ArchUnitLensBundle.message("inspection.problem.class.forbiddenModifier", modifier.name)
+    is ClassConditionViolation.MissingMetaAnnotation -> ArchUnitLensBundle.message(
+        "inspection.problem.class.missingMetaAnnotation",
+        qualifiedName,
+    )
+    is ClassConditionViolation.ForbiddenMetaAnnotation -> ArchUnitLensBundle.message(
+        "inspection.problem.class.forbiddenMetaAnnotation",
+        qualifiedName,
+    )
     is ClassConditionViolation.MissingAssignableType -> ArchUnitLensBundle.message("inspection.problem.class.assignableTo", qualifiedName)
 }

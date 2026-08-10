@@ -310,6 +310,47 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(ArchRuleIndexingStatus.SMART, service.scanMetrics().indexingStatus)
     }
 
+    fun testDumbModeDoesNotResolveNewBoundedStaticClassFacts() {
+        addArchitectureRules("ArchitectureRules.java", boundedRecordRule("ArchitectureRules", "initial_records"))
+        val service = project.service<ArchRuleProjectService>()
+        assertEquals(listOf("initial_records"), service.discoveries().map { it.ruleName })
+        assertTrue(service.discoveries().single().liveRule is ClassConventionRule)
+
+        addArchitectureRules("MoreArchitectureRules.java", boundedRecordRule("MoreArchitectureRules", "new_records"))
+
+        DumbModeTestUtils.runInDumbModeSynchronously(project) {
+            assertEquals(listOf("initial_records"), service.discoveries().map { it.ruleName })
+            assertEquals(ArchRuleIndexingStatus.INDEXING, service.scanMetrics().indexingStatus)
+        }
+
+        assertEquals(setOf("initial_records", "new_records"), service.discoveries().map { it.ruleName }.toSet())
+    }
+
+    fun testInlineMultiPackageClassRuleDoesNotBecomeResolutionDependent() {
+        addArchitectureRules(
+            "ArchitectureRules.java",
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule inline_packages = classes().that()
+                            .resideInAnyPackage("..api..", "..application..").should().beRecords();
+                }
+            """.trimIndent(),
+        )
+        val service = project.service<ArchRuleProjectService>()
+        assertEquals(listOf("inline_packages"), service.discoveries().map { it.ruleName })
+
+        myFixture.addFileToProject(
+            "src/test/java/com/example/OrdinaryType.java",
+            "package com.example; class OrdinaryType {}",
+        )
+
+        assertEquals(listOf("inline_packages"), service.discoveries().map { it.ruleName })
+        assertEquals(0, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
     fun testCommentedClassLiteralReparsesWhenTargetAppearsAfterCacheWarmup() {
         addArchitectureRules("ArchitectureRules.java", commentedClassLiteralAssignabilityRule())
         val service = project.service<ArchRuleProjectService>()
@@ -322,6 +363,98 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
 
         assertTrue(service.discoveries().single().liveRule is ClassConventionRule)
         assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
+    fun testStringMemberConventionTargetsReparseWhenTypesAppearAfterCacheWarmup() {
+        addArchitectureRules(
+            "MemberRules.java",
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
+
+                class MemberRules {
+                    @ArchTest static final ArchRule mapped_methods = methods().that()
+                            .areMetaAnnotatedWith("com.example.RequestMapping")
+                            .should().haveRawReturnType("com.example.ResponseEntity");
+                }
+            """.trimIndent(),
+        )
+        val service = project.service<ArchRuleProjectService>()
+
+        assertNull(service.discoveries().single().liveRule)
+        myFixture.addFileToProject(
+            "src/test/java/com/example/RequestMapping.java",
+            "package com.example; public @interface RequestMapping {}",
+        )
+        val responseEntity = myFixture.addFileToProject(
+            "src/test/java/com/example/ResponseEntity.java",
+            "package com.example; public class ResponseEntity<T> {}",
+        )
+
+        assertTrue(service.discoveries().single().liveRule is MemberConventionRule)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+        WriteCommandAction.runWriteCommandAction(project) { responseEntity.delete() }
+
+        assertNull(service.discoveries().single().liveRule)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
+    fun testStringMemberDeclaringClassAnnotationTargetReparsesWhenTypeAppearsAndDisappears() {
+        addArchitectureRules(
+            "MemberRules.java",
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
+
+                class MemberRules {
+                    @ArchTest static final ArchRule unannotated_methods_are_static = methods().that()
+                            .areDeclaredInClassesThat().areNotAnnotatedWith("com.example.Component")
+                            .should().beStatic();
+                }
+            """.trimIndent(),
+        )
+        val service = project.service<ArchRuleProjectService>()
+
+        assertNull(service.discoveries().single().liveRule)
+        val component = myFixture.addFileToProject(
+            "src/test/java/com/example/Component.java",
+            "package com.example; public @interface Component {}",
+        )
+
+        assertTrue(service.discoveries().single().liveRule is MemberConventionRule)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+        WriteCommandAction.runWriteCommandAction(project) { component.delete() }
+
+        assertNull(service.discoveries().single().liveRule)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
+    fun testClassAnnotationStringRuleKeepsCandidateCacheAcrossUnrelatedPsiChanges() {
+        addArchitectureRules(
+            "ClassRules.java",
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+                class ClassRules {
+                    @ArchTest static final ArchRule annotated = classes().that()
+                            .areAnnotatedWith("com.example.Component")
+                            .should().beEnums();
+                }
+            """.trimIndent(),
+        )
+        val service = project.service<ArchRuleProjectService>()
+        assertEquals(1, service.discoveries().size)
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Unrelated.java",
+            "package com.example; class Unrelated {}",
+        )
+
+        assertEquals(1, service.discoveries().size)
+        assertEquals(0, service.scanMetrics().parsedRuleCandidateFiles)
     }
 
     fun testSpacedAssignableCallReparsesWhenTargetDisappearsAfterCacheWarmup() {
@@ -477,6 +610,25 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
                                 .resideInAPackage("..controller..")
                                 .should()
                                 .haveSimpleNameEndingWith("$requiredSuffix");
+            }
+        """.trimIndent()
+
+    private fun boundedRecordRule(
+        className: String,
+        ruleName: String,
+    ): String =
+        """
+            package com.example;
+
+            import com.tngtech.archunit.junit.ArchTest;
+            import com.tngtech.archunit.lang.ArchRule;
+            import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
+            class $className {
+                private static final String[] PACKAGES = {"..util.."};
+
+                @ArchTest static final ArchRule $ruleName = classes().that()
+                        .resideInAnyPackage(PACKAGES).should().beRecords();
             }
         """.trimIndent()
 

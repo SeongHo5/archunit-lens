@@ -62,6 +62,15 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         assertTrue(output.contains(statusLine(ArchUnitLensBundle.message("overview.status.supported"))))
         assertTrue(output.contains(ArchUnitLensBundle.message("overview.reason", "Services stay explicit.")))
         assertTrue(output.contains("multi_package_dependency_shape"))
+        val negativeRuleOutput = output.substringAfter("multi_package_dependency_shape").substringBefore("\n\n")
+        assertTrue(
+            negativeRuleOutput.contains(
+                ArchUnitLensBundle.message(
+                    "overview.polarity",
+                    ArchUnitLensBundle.message("overview.polarity.negative"),
+                ),
+            ),
+        )
         assertTrue(output.contains("custom_proxy_helper_is_unsupported"))
         assertTrue(output.contains("no_system_streams"))
         assertTrue(output.contains("(accessField(java.lang.System.out) OR accessField(java.lang.System.err))"))
@@ -167,6 +176,43 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         )
     }
 
+    fun testFormatsSupportedStaticClassFacts() {
+        myFixture.addFileToProject(
+            "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
+            "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Transactional.java",
+            "package com.example; public @interface Transactional {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/ArchitectureRules.java",
+            """
+                import com.tngtech.archunit.core.domain.JavaModifier;
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+                class ArchitectureRules {
+                    private static final String[] UTIL_PACKAGES = {"..util.."};
+                    @ArchTest static final ArchRule utility_records = classes().that()
+                            .resideInAnyPackage(UTIL_PACKAGES)
+                            .and().areMetaAnnotatedWith("com.example.Transactional")
+                            .should().beRecords().andShould().notHaveModifier(JavaModifier.FINAL);
+                }
+            """.trimIndent(),
+        )
+
+        val output = ArchUnitLensRuleOverviewFormatter.render(
+            discoveries = project.service<ArchRuleProjectService>().discoveries().toOverviewItems("ArchitectureRules.java"),
+            metrics = project.service<ArchRuleProjectService>().scanMetrics(),
+        )
+
+        assertTrue(output.contains("areMetaAnnotatedWith(com.example.Transactional)"))
+        assertTrue(output.contains("beRecords"))
+        assertTrue(output.contains("notHaveModifier(FINAL)"))
+        assertTrue(output.contains(statusLine(ArchUnitLensBundle.message("overview.status.supported"))))
+    }
+
     fun testFormatsHelperBackedCustomConditionsWithoutTreatingBecauseAsCondition() {
         myFixture.addFileToProject(
             "src/test/java/com/example/HelperBackedCustomConditions.java",
@@ -264,6 +310,34 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         assertFalse(output.contains("services_should_end_with_service"))
         assertTrue(output.contains("custom_proxy_helper_is_unsupported"))
         assertTrue(output.contains(ArchUnitLensBundle.message("overview.diagnostic.unsupported", "custom")))
+    }
+
+    fun testFormatsNegativeMemberSubjectAndPolarity() {
+        myFixture.addFileToProject(
+            "src/test/java/com/example/Value.java",
+            "package com.example; public @interface Value {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/NegativeMemberRules.java",
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+                class NegativeMemberRules {
+                    @ArchTest static final ArchRule no_value_fields = noFields().should()
+                            .beAnnotatedWith(com.example.Value.class);
+                }
+            """.trimIndent(),
+        )
+
+        val service = project.service<ArchRuleProjectService>()
+        val output = ArchUnitLensRuleOverviewFormatter.render(
+            service.discoveries().toOverviewItems("NegativeMemberRules.java"),
+            service.scanMetrics(),
+        )
+
+        assertTrue(output.contains(ArchUnitLensBundle.message("overview.subject", ArchUnitLensBundle.message("overview.subject.fields"))))
+        assertTrue(output.contains(ArchUnitLensBundle.message("overview.polarity", ArchUnitLensBundle.message("overview.polarity.negative"))))
     }
 
     private fun statusLine(status: String): String = ArchUnitLensBundle.message("overview.status", status)

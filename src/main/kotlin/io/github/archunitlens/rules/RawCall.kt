@@ -68,8 +68,15 @@ sealed interface RawArgument {
  * Extracts ArchUnit DSL calls in source order without executing user code.
  */
 object RawCallExtractor {
-    fun from(expression: PsiExpression): List<RawCall> {
+    fun from(expression: PsiExpression): List<RawCall> = callsWithSource(expression).map { it.first }
+
+    /**
+     * Returns extracted calls with their short-lived PSI source for parser-only
+     * literal resolution. Callers must not retain the PSI half in rule metadata.
+     */
+    internal fun callsWithSource(expression: PsiExpression): List<Pair<RawCall, PsiMethodCallExpression>> {
         val calls = mutableListOf<RawCall>()
+        val sourceCalls = mutableListOf<PsiMethodCallExpression>()
         var current = expression.unwrapped() as? PsiMethodCallExpression
         while (current != null) {
             current.methodExpression.referenceName?.let { methodName ->
@@ -79,10 +86,11 @@ object RawCallExtractor {
                         argument.toRawArgument(index)
                     },
                 )
+                sourceCalls += current
             }
             current = current.methodExpression.qualifierExpression?.unwrapped() as? PsiMethodCallExpression
         }
-        return calls.asReversed()
+        return calls.asReversed().zip(sourceCalls.asReversed())
     }
 
     private fun PsiExpression.toRawArgument(position: Int): RawArgument = when (this) {

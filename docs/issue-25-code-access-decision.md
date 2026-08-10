@@ -4,7 +4,7 @@
 
 **SUPERSEDED FOR THE EXACT SUBSET.** Issues #49 and #50 implement resolved exact field, signature-aware method, and constructor accesses for `noClasses()` rules. Access `Where` predicates, non-literal schemas, rule-side helper/custom lambdas, method references, call graphs, and bytecode analysis remain deferred.
 
-The inspection uses ordinary non-recursive Java PSI visitor callbacks and resolves only candidate member names from a complete supported rule. Issue #49 adds no explicit recursive body scan, call graph, data-flow analysis, cache, listener, setting, or dependency.
+The inspection uses ordinary non-recursive Java PSI visitor callbacks and resolves only candidate member names from a complete supported rule. Issues #49 and #50 add no explicit recursive body scan, call graph, data-flow analysis, cache, listener, setting, or dependency.
 
 ## Implemented exact shapes
 
@@ -20,7 +20,7 @@ Logger calls that accept a `Throwable` are matched by resolved overload and argu
 
 - Candidate callbacks: a non-recursive `JavaElementVisitor` over `PsiMethodCallExpression`, `PsiNewExpression`, and `PsiReferenceExpression`.
 - Candidate resolution APIs: `PsiMethodCallExpression.resolveMethod()`, `PsiNewExpression.resolveConstructor()`, and `PsiReferenceExpression.resolve()` followed by exact owner FQN, member name, and ordered raw-signature checks.
-- Prefilter by cheap reference/method names before resolving, and resolve each candidate once.
+- Prefilter by cheap reference/method/class names before resolving, and resolve each candidate member once. An implicit zero-argument constructor whose member resolve returns `null` is the bounded exception: it performs one additional class-reference resolve and matches only a resolved class with no declared constructors.
 - Perform PSI reads only inside the inspection visitor/read-action contract. Do not retain raw PSI outside that lifetime.
 - During indexing/dumb mode, return no new findings unless a later design proves a safe stub/index path.
 - Any cache would need invalidation for PSI changes, classpath changes, and settings; no cache is justified by current measurements.
