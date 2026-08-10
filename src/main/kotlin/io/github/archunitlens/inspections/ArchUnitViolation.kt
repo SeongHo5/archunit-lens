@@ -103,5 +103,17 @@ private fun ClassConditionViolation.message(): String = when (this) {
     ClassConditionViolation.MustNotBeInterface -> ArchUnitLensBundle.message("inspection.problem.class.mustNotBeInterface")
     ClassConditionViolation.MustBeEnum -> ArchUnitLensBundle.message("inspection.problem.class.mustBeEnum")
     ClassConditionViolation.MustNotBeEnum -> ArchUnitLensBundle.message("inspection.problem.class.mustNotBeEnum")
+    ClassConditionViolation.MustBeRecord -> ArchUnitLensBundle.message("inspection.problem.class.mustBeRecord")
+    ClassConditionViolation.MustNotBeRecord -> ArchUnitLensBundle.message("inspection.problem.class.mustNotBeRecord")
+    is ClassConditionViolation.MissingModifier -> ArchUnitLensBundle.message("inspection.problem.class.missingModifier", modifier.name)
+    is ClassConditionViolation.ForbiddenModifier -> ArchUnitLensBundle.message("inspection.problem.class.forbiddenModifier", modifier.name)
+    is ClassConditionViolation.MissingMetaAnnotation -> ArchUnitLensBundle.message(
+        "inspection.problem.class.missingMetaAnnotation",
+        qualifiedName,
+    )
+    is ClassConditionViolation.ForbiddenMetaAnnotation -> ArchUnitLensBundle.message(
+        "inspection.problem.class.forbiddenMetaAnnotation",
+        qualifiedName,
+    )
     is ClassConditionViolation.MissingAssignableType -> ArchUnitLensBundle.message("inspection.problem.class.assignableTo", qualifiedName)
 }

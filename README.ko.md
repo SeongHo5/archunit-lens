@@ -50,7 +50,7 @@ ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live wa
 - class suffix rule
 - forbidden annotation rule
 - annotation exclusivity rule
-- positive/negative annotation, single/any package, suffix/not-suffix, interface/non-interface, enum/non-enum 조건으로 구성한 static class convention
+- positive/negative annotation, literal meta-annotation, single/any package(동일 클래스의 안전한 `private static final` literal `String[]` 포함), suffix/not-suffix, interface/non-interface, enum/non-enum, record/non-record, `JavaModifier.FINAL` 조건으로 구성한 static class convention
 - 모든 leaf가 정적으로 지원될 때 left-associative class predicate `and()` / `or()`와 독립적인 `andShould()` condition
 - `beAssignableTo(...)` 대상이 resolve되는 QueryMapper 형태 interface rule
 - direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule

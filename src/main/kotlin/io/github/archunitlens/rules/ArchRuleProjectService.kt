@@ -13,6 +13,7 @@ import com.intellij.openapi.roots.ProjectRootModificationTracker
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiClassObjectAccessExpression
 import com.intellij.psi.PsiJavaFile
+import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.search.GlobalSearchScope
@@ -373,7 +374,22 @@ private fun PsiJavaFile.textHashStamp(): Int = text.hashCode()
 private fun PsiJavaFile.requiresTypeResolution(): Boolean = PsiTreeUtil
     .findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null ||
     PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
-        .any { it.methodExpression.referenceName == "beAssignableTo" }
+        .any { call ->
+            call.methodExpression.referenceName in setOf(
+                "beAssignableTo",
+                "areMetaAnnotatedWith",
+                "areNotMetaAnnotatedWith",
+                "beMetaAnnotatedWith",
+                "notBeMetaAnnotatedWith",
+                "haveModifier",
+                "notHaveModifier",
+            ) ||
+                (
+                    call.methodExpression.referenceName == "resideInAnyPackage" &&
+                        call.argumentList.expressions.singleOrNull()
+                            ?.let { it !is PsiLiteralExpression } == true
+                    )
+        }
 
 private fun DiscoveredArchRule.appliesToPackage(packageName: String): Boolean = liveRule?.appliesToPackage(packageName)
     ?: descriptor.scope.includes(packageName)
