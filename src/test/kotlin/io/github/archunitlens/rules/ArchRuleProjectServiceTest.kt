@@ -551,10 +551,18 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         }
     }
 
-    fun testExactCodeAccessRuleUsesAnalyzeClassesPackageScope() {
+    fun testSignatureCodeAccessRuleUsesAnalyzeClassesPackageScope() {
         myFixture.addFileToProject(
             "src/test/java/java/lang/Throwable.java",
             "package java.lang; public class Throwable { public void printStackTrace() {} }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/util/List.java",
+            "package java.util; public interface List<E> {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/springframework/data/domain/PageImpl.java",
+            "package org.springframework.data.domain; public class PageImpl<T> { public PageImpl(java.util.List<T> items) {} }",
         )
         addArchitectureRules(
             "ArchitectureRules.java",
@@ -566,13 +574,15 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
                 @AnalyzeClasses(packages = "com.example.app")
                 class ArchitectureRules {
                     @ArchTest static final ArchRule no_print_stack_trace = noClasses()
-                            .should().callMethod(java.lang.Throwable.class, "printStackTrace");
+                            .should().callMethod(java.lang.Throwable.class, "printStackTrace")
+                            .orShould().callConstructor(org.springframework.data.domain.PageImpl.class, java.util.List.class);
                 }
             """.trimIndent(),
         )
         val service = project.service<ArchRuleProjectService>()
 
-        assertTrue(service.rulesForPackage("com.example.app").single() is NoClassesCodeAccessRule)
+        val rule = service.rulesForPackage("com.example.app").single() as NoClassesCodeAccessRule
+        assertTrue(rule.condition is ConditionExpr.Or)
         assertTrue(service.rulesForPackage("com.example.other").isEmpty())
     }
 

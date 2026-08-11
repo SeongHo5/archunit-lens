@@ -7,6 +7,7 @@ import com.intellij.openapi.project.DumbService
 import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiElementVisitor
 import com.intellij.psi.PsiField
 import com.intellij.psi.PsiImportStatement
@@ -15,6 +16,7 @@ import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.PsiModifierList
+import com.intellij.psi.PsiNewExpression
 import com.intellij.psi.PsiReferenceExpression
 import com.intellij.psi.util.PsiTreeUtil
 import io.github.archunitlens.ArchUnitLensBundle
@@ -88,7 +90,13 @@ class ArchUnitLensInspection : LocalInspectionTool() {
         val methodCallRulesByName = codeAccessRules
             .flatMap { rule -> rule.condition.codeAccessLeaves().filterIsInstance<ConditionExpr.CallMethod>().map { rule to it } }
             .groupBy { it.second.methodName }
+        val constructorCallRules = codeAccessRules
+            .flatMap { rule -> rule.condition.codeAccessLeaves().filterIsInstance<ConditionExpr.CallConstructor>().map { rule to it } }
+        val constructorCallRulesByClassName = constructorCallRules.groupBy { (_, condition) ->
+            condition.ownerQualifiedName.substringAfterLast('.').substringAfterLast('$')
+        }
         val codeAccessAllowedAtBuild = !DumbService.isDumb(holder.project)
+        val codeAccessReporter = CodeAccessReporter(holder)
         val memberClassPredicateCache = ClassPredicateEvaluationCache()
 
         return object : JavaElementVisitor() {
@@ -98,28 +106,64 @@ class ArchUnitLensInspection : LocalInspectionTool() {
                 if (PsiTreeUtil.getParentOfType(expression, PsiImportStatement::class.java) != null) return
                 val candidates = fieldAccessRulesByName[expression.referenceName] ?: return
                 val access = ExactCodeAccessEvaluator.resolveFieldAccess(expression) ?: return
-                candidates.firstOrNull { (_, condition) -> ExactCodeAccessEvaluator.matches(condition, access) }
-                    ?.let { (rule, condition) ->
-                        val violation = ArchUnitViolation.ForbiddenFieldAccess(rule, condition)
-                        holder.registerProblem(
+                candidates
+                    .filter { (_, condition) -> ExactCodeAccessEvaluator.matches(condition, access) }
+                    .forEach { (rule, condition) ->
+                        codeAccessReporter.record(
+                            rule,
+                            condition,
                             expression.referenceNameElement ?: expression,
-                            violation.problemMessage(),
-                            *violation.quickFixes(),
+                            ArchUnitViolation.ForbiddenFieldAccess(rule, condition),
                         )
                     }
             }
 
             override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
                 if (!codeAccessAllowedAtBuild || DumbService.isDumb(holder.project)) return
-                val candidates = methodCallRulesByName[expression.methodExpression.referenceName] ?: return
+                val referenceName = expression.methodExpression.referenceName
+                if (referenceName == "this" || referenceName == "super") {
+                    if (constructorCallRules.isEmpty()) return
+                    val call = ExactCodeAccessEvaluator.resolveExplicitConstructorCall(expression) ?: return
+                    constructorCallRules
+                        .filter { (_, condition) -> ExactCodeAccessEvaluator.matches(condition, call) }
+                        .forEach { (rule, condition) ->
+                            codeAccessReporter.record(
+                                rule,
+                                condition,
+                                expression.methodExpression.referenceNameElement ?: expression.methodExpression,
+                                ArchUnitViolation.ForbiddenConstructorCall(rule, condition),
+                            )
+                        }
+                    return
+                }
+                val candidates = methodCallRulesByName[referenceName] ?: return
                 val call = ExactCodeAccessEvaluator.resolveMethodCall(expression) ?: return
-                candidates.firstOrNull { (_, condition) -> ExactCodeAccessEvaluator.matches(condition, call) }
-                    ?.let { (rule, condition) ->
-                        val violation = ArchUnitViolation.ForbiddenMethodCall(rule, condition)
-                        holder.registerProblem(
+                candidates
+                    .filter { (_, condition) -> ExactCodeAccessEvaluator.matches(condition, call) }
+                    .forEach { (rule, condition) ->
+                        codeAccessReporter.record(
+                            rule,
+                            condition,
                             expression.methodExpression.referenceNameElement ?: expression.methodExpression,
-                            violation.problemMessage(),
-                            *violation.quickFixes(),
+                            ArchUnitViolation.ForbiddenMethodCall(rule, condition),
+                        )
+                    }
+            }
+
+            override fun visitNewExpression(expression: PsiNewExpression) {
+                if (!codeAccessAllowedAtBuild || DumbService.isDumb(holder.project)) return
+                if (expression.anonymousClass != null) return
+                val classReference = expression.classReference ?: return
+                val candidates = constructorCallRulesByClassName[classReference.referenceName] ?: return
+                val call = ExactCodeAccessEvaluator.resolveNewExpression(expression) ?: return
+                candidates
+                    .filter { (_, condition) -> ExactCodeAccessEvaluator.matches(condition, call) }
+                    .forEach { (rule, condition) ->
+                        codeAccessReporter.record(
+                            rule,
+                            condition,
+                            classReference.referenceNameElement ?: classReference,
+                            ArchUnitViolation.ForbiddenConstructorCall(rule, condition),
                         )
                     }
             }
@@ -391,6 +435,47 @@ private data class ForbiddenDependencyMatch(
     val referenceKind: String,
 )
 
+private class CodeAccessReporter(
+    private val holder: ProblemsHolder,
+) {
+    private val observationsByClass = mutableMapOf<PsiClass, MutableMap<NoClassesCodeAccessRule, MutableList<CodeAccessObservation>>>()
+
+    fun record(
+        rule: NoClassesCodeAccessRule,
+        condition: ConditionExpr,
+        element: PsiElement,
+        violation: ArchUnitViolation,
+    ) {
+        val sourceClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java) ?: return
+        val observations = observationsByClass
+            .getOrPut(sourceClass, ::mutableMapOf)
+            .getOrPut(rule, ::mutableListOf)
+        if (observations.none { it.condition == condition && it.element === element }) {
+            observations += CodeAccessObservation(condition, element, violation)
+        }
+
+        val matchedConditions = observations.mapTo(mutableSetOf()) { it.condition }
+        val contributingConditions = rule.condition.contributingCodeAccessConditions(matchedConditions) ?: return
+        observations
+            .filter { !it.reported && it.condition in contributingConditions }
+            .forEach { observation ->
+                observation.reported = true
+                holder.registerProblem(
+                    observation.element,
+                    observation.violation.problemMessage(),
+                    *observation.violation.quickFixes(),
+                )
+            }
+    }
+}
+
+private data class CodeAccessObservation(
+    val condition: ConditionExpr,
+    val element: PsiElement,
+    val violation: ArchUnitViolation,
+    var reported: Boolean = false,
+)
+
 private fun LiveArchRule.isEnabledBy(
     settings: ArchUnitLensSettingsState,
 ): Boolean = when (this) {
@@ -408,8 +493,26 @@ private fun LiveArchRule.isEnabledBy(
 }
 
 private fun ConditionExpr.codeAccessLeaves(): List<ConditionExpr> = when (this) {
+    is ConditionExpr.And -> left.codeAccessLeaves() + right.codeAccessLeaves()
     is ConditionExpr.Or -> left.codeAccessLeaves() + right.codeAccessLeaves()
     else -> listOf(this)
+}
+
+private fun ConditionExpr.contributingCodeAccessConditions(matched: Set<ConditionExpr>): Set<ConditionExpr>? = when (this) {
+    is ConditionExpr.AccessField,
+    is ConditionExpr.CallMethod,
+    is ConditionExpr.CallConstructor,
+    -> setOf(this).takeIf { this in matched }
+    is ConditionExpr.And -> {
+        val leftContributors = left.contributingCodeAccessConditions(matched)
+        val rightContributors = right.contributingCodeAccessConditions(matched)
+        if (leftContributors != null && rightContributors != null) leftContributors + rightContributors else null
+    }
+    is ConditionExpr.Or -> listOfNotNull(
+        left.contributingCodeAccessConditions(matched),
+        right.contributingCodeAccessConditions(matched),
+    ).takeIf { it.isNotEmpty() }?.flatten()?.toSet()
+    else -> null
 }
 
 private fun PredicateExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Boolean = when (this) {
@@ -449,6 +552,7 @@ private fun ConditionExpr.isEnabledBy(settings: ArchUnitLensSettingsState): Bool
     is ConditionExpr.And -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
     is ConditionExpr.AccessField,
     is ConditionExpr.CallMethod,
+    is ConditionExpr.CallConstructor,
     -> settings.dependencyRulesEnabled
     is ConditionExpr.Or -> left.isEnabledBy(settings) && right.isEnabledBy(settings)
 }

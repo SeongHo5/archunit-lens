@@ -11,13 +11,13 @@ annotation exclusivity, typed class conventions over annotation/meta-annotation/
 literal class/method meta-annotation rules, and positive method/constructor declaration conventions for private constructors,
 static methods, and resolved exact raw return types, plus statically decidable negative
 <code>noFields()</code>/<code>noMethods()</code> annotation, name, modifier, and declaring-class rules. Negative polarity is applied once
-to the complete supported condition tree. Exact <code>noClasses()</code> field accesses and zero-argument method calls are also supported,
-including bounded <code>orShould()</code> when every sibling is exact and statically resolved. Class predicate
-<code>and()</code>/<code>or()</code> and condition <code>andShould()</code> are live only when every leaf is statically supported.
+to the complete supported condition tree. Exact <code>noClasses()</code> field accesses, signature-aware method calls, and constructor
+accesses are also supported. Class predicate <code>and()</code>/<code>or()</code>, condition <code>andShould()</code>, and left-associative
+code-access <code>andShould()</code>/<code>orShould()</code> are live only when every leaf is exact, statically supported, and resolved.
 </p>
 <p>
 Unsupported, custom, or ambiguous helper-based rules are retained as Rule Overview metadata when possible
-but do not produce warnings. Unsupported field/method/constructor declarations, parameterized method/constructor access,
+but do not produce warnings. Unsupported field/method/constructor declarations, non-literal method/constructor access schemas,
 access predicates, method references, and unsupported siblings remain metadata-only. Open the ArchUnit Lens tool window to review supported and unsupported
 discovered rules, scopes, reasons, unsupported reasons, and scan metrics.
 </p>

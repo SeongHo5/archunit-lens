@@ -2,9 +2,20 @@ package io.github.archunitlens.ui
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.util.concurrent.TimeUnit
 
 class ArchUnitLensToolWindowFactoryTest : BasePlatformTestCase() {
+    fun testOverviewPanelDoesNotRetainApplicationSettingsService() {
+        val panelClass = Class.forName("io.github.archunitlens.ui.ArchUnitLensRuleOverviewPanel")
+
+        assertFalse(
+            panelClass.declaredFields.any {
+                ArchUnitLensSettings::class.java.isAssignableFrom(it.type)
+            },
+        )
+    }
+
     fun testCurrentJavaPackageReadsPsiInsideReadAction() {
         val file = myFixture.addFileToProject(
             "src/test/java/com/example/ArchitectureRules.java",

@@ -336,6 +336,7 @@ object ClassSubjectEvaluator {
         }
         is ConditionExpr.AccessField,
         is ConditionExpr.CallMethod,
+        is ConditionExpr.CallConstructor,
         is ConditionExpr.Or,
         -> null
     }

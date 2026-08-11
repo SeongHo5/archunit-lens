@@ -58,6 +58,10 @@ sealed interface ConditionExpr {
         val methodName: String,
         val parameterTypeQualifiedNames: List<String>,
     ) : ConditionExpr
+    data class CallConstructor(
+        val ownerQualifiedName: String,
+        val parameterTypeQualifiedNames: List<String>,
+    ) : ConditionExpr
     data class And(val left: ConditionExpr, val right: ConditionExpr) : ConditionExpr
     data class Or(val left: ConditionExpr, val right: ConditionExpr) : ConditionExpr
 }

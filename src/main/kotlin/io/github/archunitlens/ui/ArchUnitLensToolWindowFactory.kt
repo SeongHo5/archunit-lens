@@ -61,7 +61,6 @@ class ArchUnitLensToolWindowFactory : ToolWindowFactory {
 private class ArchUnitLensRuleOverviewPanel(
     private val project: Project,
 ) : JPanel(BorderLayout()) {
-    private val settings = service<ArchUnitLensSettings>()
     private val searchField = JBTextField(SEARCH_FIELD_COLUMNS).apply {
         emptyText.text = ArchUnitLensBundle.message("toolwindow.search.placeholder")
     }
@@ -214,14 +213,14 @@ private class ArchUnitLensRuleOverviewPanel(
     )
 
     private fun resetFiltersFromSettings() {
-        val state = settings.state
+        val state = service<ArchUnitLensSettings>().state
         showSupported.isSelected = state.showSupportedRulesInOverview
         showUnsupported.isSelected = state.showUnsupportedRulesInOverview
         showDiagnostics.isSelected = state.showDiagnosticsInOverview
     }
 
     private fun persistOverviewSettings() {
-        val state = settings.state
+        val state = service<ArchUnitLensSettings>().state
         state.showSupportedRulesInOverview = showSupported.isSelected
         state.showUnsupportedRulesInOverview = showUnsupported.isSelected
         state.showDiagnosticsInOverview = showDiagnostics.isSelected

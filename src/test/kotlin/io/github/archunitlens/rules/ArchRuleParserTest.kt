@@ -28,6 +28,22 @@ class ArchRuleParserTest : BasePlatformTestCase() {
             "package java.lang; public final class System { public static Object out; public static Object err; }",
         )
         myFixture.addFileToProject(
+            "src/test/java/org/slf4j/Logger.java",
+            "package org.slf4j; public interface Logger {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/util/List.java",
+            "package java.util; public interface List<E> {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/springframework/data/domain/Pageable.java",
+            "package org.springframework.data.domain; public interface Pageable {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/springframework/data/domain/PageImpl.java",
+            "package org.springframework.data.domain; public class PageImpl<T> {}",
+        )
+        myFixture.addFileToProject(
             "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
             "package com.tngtech.archunit.core.domain; public enum JavaModifier { FINAL, STATIC }",
         )
@@ -1008,6 +1024,99 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         )
     }
 
+    fun testParsesOrderedMethodAndConstructorSignaturesWithMixedBooleanOperators() {
+        addSignatureCodeAccessTypeStubs()
+        val methodRule = parseSingleRule(
+            exactRule(
+                "noClasses().should()" +
+                    ".callMethod(org.slf4j.Logger.class, \"error\", java.lang.String.class, java.lang.Throwable.class)" +
+                    ".orShould().callMethod(org.slf4j.Logger.class, \"warn\", java.lang.String.class, java.lang.Throwable.class)" +
+                    ".andShould().callMethod(org.slf4j.Logger.class, \"info\", long.class, java.lang.Object[].class)",
+                "noClasses",
+            ),
+        ) as NoClassesCodeAccessRule
+        assertEquals(
+            ConditionExpr.And(
+                ConditionExpr.Or(
+                    ConditionExpr.CallMethod(
+                        "org.slf4j.Logger",
+                        "error",
+                        listOf("java.lang.String", "java.lang.Throwable"),
+                    ),
+                    ConditionExpr.CallMethod(
+                        "org.slf4j.Logger",
+                        "warn",
+                        listOf("java.lang.String", "java.lang.Throwable"),
+                    ),
+                ),
+                ConditionExpr.CallMethod(
+                    "org.slf4j.Logger",
+                    "info",
+                    listOf("long", "java.lang.Object[]"),
+                ),
+            ),
+            methodRule.condition,
+        )
+
+        val constructorRule = parseSingleRule(
+            exactRule(
+                "noClasses().should()" +
+                    ".callConstructor(org.springframework.data.domain.PageImpl.class, java.util.List.class)" +
+                    ".orShould().callConstructor(org.springframework.data.domain.PageImpl.class, " +
+                    "java.util.List.class, org.springframework.data.domain.Pageable.class, long.class)",
+                "noClasses",
+            ),
+        ) as NoClassesCodeAccessRule
+        assertEquals(
+            ConditionExpr.Or(
+                ConditionExpr.CallConstructor(
+                    "org.springframework.data.domain.PageImpl",
+                    listOf("java.util.List"),
+                ),
+                ConditionExpr.CallConstructor(
+                    "org.springframework.data.domain.PageImpl",
+                    listOf("java.util.List", "org.springframework.data.domain.Pageable", "long"),
+                ),
+            ),
+            constructorRule.condition,
+        )
+        val zeroArgumentConstructorRule = parseSingleRule(
+            exactRule(
+                "noClasses().should().callConstructor(org.springframework.data.domain.PageImpl.class)",
+                "noClasses",
+            ),
+        ) as NoClassesCodeAccessRule
+        assertEquals(
+            ConditionExpr.CallConstructor("org.springframework.data.domain.PageImpl", emptyList()),
+            zeroArgumentConstructorRule.condition,
+        )
+    }
+
+    fun testSignatureAwareCodeAccessRequiresCompleteClassLiteralSchemas() {
+        addSignatureCodeAccessTypeStubs()
+        val rules = listOf(
+            "noClasses().should().callMethod(org.slf4j.Logger.class)",
+            "noClasses().should().callMethod(org.slf4j.Logger.class, dynamicName, java.lang.String.class)",
+            "noClasses().should().callMethod(org.slf4j.Logger.class, \"error\", dynamicType)",
+            "noClasses().should().callMethod(\"org.slf4j.Logger\", \"error\", \"java.lang.String\")",
+            "noClasses().should().callConstructor()",
+            "noClasses().should().callConstructor(org.springframework.data.domain.PageImpl.class, dynamicType)",
+            "noClasses().should().callConstructor(\"org.springframework.data.domain.PageImpl\", \"java.util.List\")",
+            "noClasses().should().callMethod(long.class, \"valueOf\")",
+            "noClasses().should().callConstructor(java.lang.Object[].class)",
+            "noClasses().should().callMethod(org.slf4j.Logger.class, \"error\", com.example.Missing.class)",
+            "noClasses().should().callConstructor(com.example.Missing.class, java.util.List.class)",
+            "noClasses().should().callMethod(org.slf4j.Logger.class, \"error\").orShould(customCondition())",
+            "noClasses().should().callConstructorWhere(customPredicate())",
+        )
+
+        rules.forEach { initializer ->
+            val discovered = discoverSingleRule(exactRule(initializer, "noClasses"))
+            assertNull(initializer, discovered.liveRule)
+            assertTrue(initializer, discovered.descriptor.supportStatus is SupportStatus.Unsupported)
+        }
+    }
+
     fun testParsesBoundedStaticClassFacts() {
         myFixture.addFileToProject(
             "src/test/java/com/example/Transactional.java",
@@ -1200,7 +1309,7 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         )
     }
 
-    fun testUnsupportedDeclarationAndCodeAccessRulesStayMetadataOnly() {
+    fun testCodeAccessRequiresNoClassesAndEverySiblingToBeSupported() {
         val rules = listOf(
             exactRule(
                 "classes().should().callMethod(java.lang.Throwable.class, \"printStackTrace\")",
@@ -1552,6 +1661,17 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         val source = findSingleSource(code)
         val discovery = ArchRuleParser.discover(source)
         return discovery?.liveRule ?: error("Expected supported ArchUnit Lens rule: ${discovery?.descriptor}")
+    }
+
+    private fun addSignatureCodeAccessTypeStubs() {
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/String.java",
+            "package java.lang; public final class String {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/Object.java",
+            "package java.lang; public class Object {}",
+        )
     }
 
     private fun discoverSingleRule(code: String): DiscoveredArchRule {

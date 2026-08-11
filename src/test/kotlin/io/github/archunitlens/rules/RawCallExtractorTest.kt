@@ -6,6 +6,18 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 
 class RawCallExtractorTest : BasePlatformTestCase() {
+    override fun setUp() {
+        super.setUp()
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/String.java",
+            "package java.lang; public final class String {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/Object.java",
+            "package java.lang; public class Object {}",
+        )
+    }
+
     fun testExtractsCallsInSourceOrderWithLiteralArguments() {
         val calls = extractCalls(
             """
@@ -95,6 +107,27 @@ class RawCallExtractorTest : BasePlatformTestCase() {
 
         assertEquals(listOf("classes", "should"), calls.map { it.name })
         assertEquals(listOf(RawArgument.Lambda(0)), calls.last().arguments)
+    }
+
+    fun testResolvesOrderedPrimitiveAndArrayClassLiterals() {
+        val calls = extractCalls(
+            """
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+
+                class ArchitectureRules {
+                    Object rule = noClasses().should().callMethod(
+                            java.lang.String.class,
+                            "valueOf",
+                            long.class,
+                            java.lang.Object[].class);
+                }
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf("java.lang.String", "long", "java.lang.Object[]"),
+            calls.last().arguments.filterIsInstance<RawArgument.ClassLiteral>().map { it.resolvedQualifiedName },
+        )
     }
 
     private fun extractCalls(code: String): List<RawCall> {

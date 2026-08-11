@@ -122,6 +122,60 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
         assertFalse(output.contains(ArchUnitLensBundle.message("overview.unsupported.multiPackageRuleShape")))
     }
 
+    fun testFormatsOrderedMethodAndConstructorSignatures() {
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/String.java",
+            "package java.lang; public final class String {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/lang/Throwable.java",
+            "package java.lang; public class Throwable {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/java/util/List.java",
+            "package java.util; public interface List<E> {}",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/springframework/data/domain/PageImpl.java",
+            "package org.springframework.data.domain; public class PageImpl<T> { public PageImpl(java.util.List<T> items) {} }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/org/slf4j/Logger.java",
+            "package org.slf4j; public interface Logger { " +
+                "void error(java.lang.String message, java.lang.Throwable failure); }",
+        )
+        myFixture.addFileToProject(
+            "src/test/java/com/example/ArchitectureRules.java",
+            """
+                import com.tngtech.archunit.junit.ArchTest;
+                import com.tngtech.archunit.lang.ArchRule;
+                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+                class ArchitectureRules {
+                    @ArchTest static final ArchRule exact_signatures = noClasses().should()
+                            .callMethod(org.slf4j.Logger.class, "error", java.lang.String.class, java.lang.Throwable.class)
+                            .orShould().callConstructor(org.springframework.data.domain.PageImpl.class, java.util.List.class);
+                }
+            """.trimIndent(),
+        )
+
+        val service = project.service<ArchRuleProjectService>()
+        val output = ArchUnitLensRuleOverviewFormatter.render(
+            discoveries = service.discoveries().toOverviewItems("ArchitectureRules.java"),
+            metrics = service.scanMetrics(),
+        )
+
+        assertTrue(
+            output.contains(
+                "callMethod(org.slf4j.Logger.error(java.lang.String, java.lang.Throwable))",
+            ),
+        )
+        assertTrue(
+            output.contains(
+                "callConstructor(org.springframework.data.domain.PageImpl(java.util.List))",
+            ),
+        )
+    }
+
     fun testFormatsSupportedStaticClassFacts() {
         myFixture.addFileToProject(
             "src/test/java/com/tngtech/archunit/core/domain/JavaModifier.java",
