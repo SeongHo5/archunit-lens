@@ -1,5 +1,19 @@
 # ArchUnit Lens Changelog
 
+## [0.3.0] - 2026-08-11
+
+Minor release focused on live member conventions and exact signature-aware code-access feedback.
+
+### Added
+
+- Expanded statically provable class conventions with record, final-modifier, composed meta-annotation, and safe literal package-array facts.
+- Added live positive method/constructor conventions and negative field/method conventions for supported annotations, names, modifiers, and declaring-class facts.
+- Added exact `noClasses()` field, method, and constructor access checks with overload-aware erased signatures, primitive/array/vararg parameters, explicit and implicit constructor calls, and bounded `andShould()` / `orShould()` chains.
+
+### Fixed
+
+- Kept unresolved, indexing-mode, dynamic, helper-backed, and mixed unsupported rule shapes warning-free while bounding editor-path PSI resolution.
+
 ## [0.2.1] - 2026-07-31
 
 Patch release focused on accurate meta-annotation warnings, clearer custom-condition metadata, and leaner editor inspections.
