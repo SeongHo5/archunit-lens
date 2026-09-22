@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest an ArchUnit Lens improvement, UI enhancement, or supported-rule expansion.
+labels:
+  - "type: feature"
+body:
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What should ArchUnit Lens make possible or easier?
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior
+      description: What happens today, and why is it limiting?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Where does this appear? Include relevant UI surfaces, rule types, workflows, or project examples.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: improvement-area
+    attributes:
+      label: Improvement area
+      description: Which part of ArchUnit Lens would this improve?
+      options:
+        - Rule overview / tool window
+        - Inspection behavior
+        - Quick fix
+        - Rule parser support
+        - Settings
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: possible-solution
+    attributes:
+      label: Possible solution
+      description: Optionally describe an implementation idea or acceptance criteria.
+
+  - type: textarea
+    id: additional-notes
+    attributes:
+      label: Additional notes
+      description: Add screenshots, examples, or related issues if useful.

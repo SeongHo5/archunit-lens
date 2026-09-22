@@ -1,0 +1,78 @@
+name: Bug report
+description: Report broken ArchUnit Lens behavior, IDE exceptions, or incorrect inspection/tool-window results.
+labels:
+  - "type: bug"
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: What is broken or not working as expected?
+      placeholder: Describe the problem clearly and concisely.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: To reproduce
+      description: List the exact steps that trigger the problem.
+      placeholder: |
+        1. Open IntelliJ IDEA with the plugin installed.
+        2. Open the ArchUnit Lens tool window or affected Java file.
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behavior
+      description: What actually happens? Include visible UI symptoms and whether the behavior is repeated or happens only once.
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-output
+    attributes:
+      label: Error or stack trace
+      description: Paste IDE exception details, logs, or stack traces if available.
+      render: text
+
+  - type: input
+    id: idea-version
+    attributes:
+      label: IntelliJ IDEA version
+      placeholder: "Example: 2026.2.1"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: ArchUnit Lens version
+      placeholder: "Example: 0.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      placeholder: "Example: macOS 27.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add screenshots, sample ArchUnit rules, the affected project shape, or anything else useful.
