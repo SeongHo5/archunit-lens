@@ -42,6 +42,8 @@ import javax.swing.event.DocumentListener
  * The factory is intentionally a class because IntelliJ Platform owns extension
  * instantiation for `plugin.xml` registrations.
  */
+// Compatibility bridges would invoke internal platform defaults instead of inheriting them.
+@JvmDefaultWithoutCompatibility
 class ArchUnitLensToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(
         project: Project,

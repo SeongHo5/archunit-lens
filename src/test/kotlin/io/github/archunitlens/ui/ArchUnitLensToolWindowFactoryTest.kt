@@ -6,6 +6,13 @@ import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.util.concurrent.TimeUnit
 
 class ArchUnitLensToolWindowFactoryTest : BasePlatformTestCase() {
+    fun testFactoryInheritsPlatformDefaultsWithoutCompatibilityBridges() {
+        assertEquals(
+            setOf("createToolWindowContent"),
+            ArchUnitLensToolWindowFactory::class.java.declaredMethods.map { it.name }.toSet(),
+        )
+    }
+
     fun testOverviewPanelDoesNotRetainApplicationSettingsService() {
         val panelClass = Class.forName("io.github.archunitlens.ui.ArchUnitLensRuleOverviewPanel")
 
