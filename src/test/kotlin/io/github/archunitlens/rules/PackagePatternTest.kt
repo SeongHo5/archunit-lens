@@ -10,7 +10,15 @@ class PackagePatternTest {
         listOf("com.example.service", "..domain..", "..controller", "org.springframework.web..").forEach { pattern ->
             assertTrue(pattern, PackagePattern.isSupported(pattern))
         }
-        listOf("com.*.service", "com..service", "com.(*)", "..", ".com.example").forEach { pattern ->
+        listOf(
+            "com.*.service",
+            "com..service",
+            "com.example..service",
+            "com..example..service",
+            "com.(*)",
+            "..",
+            ".com.example",
+        ).forEach { pattern ->
             assertFalse(pattern, PackagePattern.isSupported(pattern))
         }
     }

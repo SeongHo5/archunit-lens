@@ -841,6 +841,75 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         }
     }
 
+    fun testExactHandlersKeepUnsupportedPackagePatternsMetadataOnly() {
+        val cases = listOf(
+            "dependency source mixed list" to exactRule(
+                "noClasses().that().resideInAnyPackage(\"..domain..\", \"com..service\").should()" +
+                    ".dependOnClassesThat().resideInAPackage(\"..infrastructure..\")",
+                "noClasses",
+            ),
+            "dependency target mixed list" to exactRule(
+                "noClasses().that().resideInAPackage(\"..domain..\").should().dependOnClassesThat()" +
+                    ".resideInAnyPackage(\"..infrastructure..\", \"com.*.adapter\")",
+                "noClasses",
+            ),
+            "suffix internal double dot" to exactRule(
+                "classes().that().resideInAPackage(\"com..service\").should().haveSimpleNameEndingWith(\"Service\")",
+                "classes",
+            ),
+            "suffix wildcard" to exactRule(
+                "classes().that().resideInAPackage(\"com.*.service\").should().haveSimpleNameEndingWith(\"Service\")",
+                "classes",
+            ),
+            "forbidden annotation internal double dot" to exactRule(
+                "noClasses().that().resideInAPackage(\"com..domain\").should()" +
+                    ".beAnnotatedWith(com.example.Service.class)",
+                "noClasses",
+            ),
+            "forbidden annotation wildcard" to exactRule(
+                "noClasses().that().resideInAPackage(\"com.*.domain\").should()" +
+                    ".beAnnotatedWith(com.example.Service.class)",
+                "noClasses",
+            ),
+        )
+
+        cases.forEach { (name, code) ->
+            val discovered = discoverSingleRule(code)
+            assertNull("$name must stay metadata-only", discovered.liveRule)
+            val reason = (discovered.descriptor.supportStatus as SupportStatus.Unsupported).reason
+            assertTrue("$name must explain its unsupported package pattern", reason is UnsupportedReason.UnsupportedArgument)
+            reason as UnsupportedReason.UnsupportedArgument
+            assertTrue(reason.kind, reason.kind.startsWith("unsupported package pattern"))
+        }
+    }
+
+    fun testExactHandlersKeepSupportedPackagePatternFormsLive() {
+        val packageDependency = discoverSingleRule(
+            exactRule(
+                "noClasses().that().resideInAPackage(\"com.example.domain\").should()" +
+                    ".dependOnClassesThat().resideInAPackage(\"org.example.infrastructure..\")",
+                "noClasses",
+            ),
+        )
+        val suffix = discoverSingleRule(
+            exactRule(
+                "classes().that().resideInAPackage(\"..controller\").should().haveSimpleNameEndingWith(\"Controller\")",
+                "classes",
+            ),
+        )
+        val forbiddenAnnotation = discoverSingleRule(
+            exactRule(
+                "noClasses().that().resideInAPackage(\"com.example.domain..\").should()" +
+                    ".beAnnotatedWith(com.example.Service.class)",
+                "noClasses",
+            ),
+        )
+
+        assertTrue(packageDependency.liveRule is PackageDependencyBanRule)
+        assertTrue(suffix.liveRule is ClassNameSuffixRule)
+        assertTrue(forbiddenAnnotation.liveRule is ForbiddenAnnotationRule)
+    }
+
     fun testDanglingClassPredicateTokensStayMetadataOnly() {
         val malformedRules = listOf(
             "classes().that().should().beEnums()",

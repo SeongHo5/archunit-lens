@@ -26,7 +26,7 @@ import io.github.archunitlens.settings.ArchUnitLensSettings
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Project-level rule index backed by indexed candidate lookup and per-rule-file text stamps.
+ * Project-level rule index backed by indexed candidate lookup and per-rule-file text snapshots.
  *
  * The service keeps inspection visitors cheap by caching parsed ArchUnit rules
  * until project PSI changes, then using IntelliJ's text index to avoid resolving
@@ -179,10 +179,10 @@ class ArchRuleProjectService(private val project: Project) {
             .flatMap { file ->
                 candidateFileCount++
                 val cacheKey = file.virtualFile?.path ?: file.name
-                val modificationStamp = file.textHashStamp()
+                val sourceText = file.text
                 val cachedFile = cachedRuleFiles[cacheKey]
                 val resolutionDependent = file.requiresTypeResolution()
-                val canReuseCachedFile = cachedFile?.modificationStamp == modificationStamp &&
+                val canReuseCachedFile = cachedFile?.sourceText == sourceText &&
                     (!resolutionDependent || cachedFile.resolutionStamp == resolutionStamp)
                 var currentRuleSourceCount = cachedFile?.ruleSourceCount ?: 0
                 val ruleFileDiscoveries = if (canReuseCachedFile) {
@@ -195,7 +195,7 @@ class ArchRuleProjectService(private val project: Project) {
                 }
                 ruleSourceCount += currentRuleSourceCount
                 nextRuleFiles[cacheKey] = CachedRuleFileDiscoveries(
-                    modificationStamp = modificationStamp,
+                    sourceText = sourceText,
                     resolutionStamp = resolutionStamp.takeIf { resolutionDependent },
                     ruleSourceCount = currentRuleSourceCount,
                     discoveries = ruleFileDiscoveries,
@@ -353,7 +353,7 @@ internal enum class ArchRuleIndexingStatus {
 }
 
 private data class CachedRuleFileDiscoveries(
-    val modificationStamp: Int,
+    val sourceText: String,
     val resolutionStamp: ResolutionStamp?,
     val ruleSourceCount: Int,
     val discoveries: List<DiscoveredArchRule>,
@@ -368,8 +368,6 @@ private val LOG = Logger.getInstance(ArchRuleProjectService::class.java)
 
 private const val ARCH_TEST_WORD = "ArchTest"
 private const val NANOS_PER_MILLISECOND = 1_000_000
-
-private fun PsiJavaFile.textHashStamp(): Int = text.hashCode()
 
 private fun PsiJavaFile.requiresTypeResolution(): Boolean {
     if (PsiTreeUtil.findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null) return true

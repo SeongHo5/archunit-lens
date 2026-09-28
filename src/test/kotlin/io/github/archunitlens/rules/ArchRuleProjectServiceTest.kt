@@ -9,6 +9,8 @@ import com.intellij.testFramework.DumbModeTestUtils
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.settings.ArchUnitLensSettings
+import io.github.archunitlens.ui.ArchUnitLensRuleOverviewFormatter
+import io.github.archunitlens.ui.RuleOverviewItem
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -184,6 +186,52 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(1, secondScan.indexedJavaCandidateFiles)
         assertEquals(1, secondScan.archRuleCandidateFiles)
         assertEquals(1, secondScan.parsedRuleCandidateFiles)
+    }
+
+    fun testDiscoveryReparsesEditedRuleCandidateWhenTextHashesCollide() {
+        val initialSource = classSuffixRule("AaService")
+        val updatedSource = classSuffixRule("BBService")
+        assertEquals(initialSource.length, updatedSource.length)
+        assertEquals(initialSource.hashCode(), updatedSource.hashCode())
+
+        val ruleFile = addArchitectureRules("ArchitectureRules.java", initialSource)
+        val service = project.service<ArchRuleProjectService>()
+        val initialDiscovery = service.discoveries().single()
+        assertEquals("AaService", (initialDiscovery.liveRule as ClassNameSuffixRule).requiredSuffix)
+        assertEquals(
+            "AaService",
+            (service.rulesForPackage("com.example.controller").single() as ClassNameSuffixRule).requiredSuffix,
+        )
+
+        val document = PsiDocumentManager.getInstance(project).getDocument(ruleFile)
+            ?: error("Expected document for ArchUnit rule file")
+        WriteCommandAction.runWriteCommandAction(project) {
+            document.setText(updatedSource)
+            PsiDocumentManager.getInstance(project).commitDocument(document)
+        }
+
+        val updatedDiscovery = service.discoveries().single()
+        assertEquals("BBService", (updatedDiscovery.liveRule as ClassNameSuffixRule).requiredSuffix)
+        assertEquals(
+            "BBService",
+            (service.discoveriesForPackage("com.example.controller").single().liveRule as ClassNameSuffixRule).requiredSuffix,
+        )
+        assertEquals(
+            "BBService",
+            (service.rulesForPackage("com.example.controller").single() as ClassNameSuffixRule).requiredSuffix,
+        )
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+
+        val overview = ArchUnitLensRuleOverviewFormatter.renderDetails(
+            RuleOverviewItem(
+                discovery = updatedDiscovery,
+                sourceFileName = updatedDiscovery.descriptor.sourcePointer.element?.containingFile?.name,
+            ),
+            currentPackage = "com.example.controller",
+        )
+        assertTrue(overview.contains("BBService"))
+        assertFalse(overview.contains("AaService"))
+        assertTrue(overview.contains("ArchitectureRules.java"))
     }
 
     fun testRulesForPackageFiltersByAnalyzeScopeAndPackagePatternAndCachesLookups() {

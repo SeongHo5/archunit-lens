@@ -44,6 +44,7 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
 
     fun testPackageDependencyBanHighlightsForbiddenImport() {
         addArchitectureRulesFixture("packageDependencyBan")
+        addDependencyReferenceStubs()
 
         myFixture.configureByText(
             "OrderService.java",
@@ -131,6 +132,7 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
     }
 
     fun testGoToArchUnitRuleQuickFixNavigatesToRuleFile() {
+        addDependencyReferenceStubs()
         addArchitectureRules(
             """
                 import com.tngtech.archunit.junit.ArchTest;
@@ -224,6 +226,10 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
 
     fun testPackageDependencyBanSupportsResideInAnyPackageSourceAndTarget() {
         addArchitectureRulesFixture("resideInAnyPackageDependencyBan")
+        myFixture.addFileToProject(
+            "src/test/java/com/example/adapter/http/OrderController.java",
+            "package com.example.adapter.http; public class OrderController {}",
+        )
 
         myFixture.configureByText(
             "OrderService.java",
