@@ -1,5 +1,16 @@
 # ArchUnit Lens Changelog
 
+## [0.3.1] - 2026-09-29
+
+Patch release focused on accurate package-rule feedback, fresh rule discoveries, and safe rename previews.
+
+### Fixed
+
+- Kept unsupported package patterns metadata-only across dependency, class suffix, and forbidden-annotation rules, including mixed pattern lists.
+- Matched dependency targets by their actual package, including nested classes, while preserving import/reference deduplication and avoiding dependency resolution during indexing.
+- Refreshed cached rules and overview data after source edits with identical text hashes while retaining unchanged-file reuse.
+- Disabled unsupported class-suffix rename previews without changing the actual rename, usage updates, or undo behavior.
+
 ## [0.3.0] - 2026-08-11
 
 Minor release focused on live member conventions and exact signature-aware code-access feedback.
