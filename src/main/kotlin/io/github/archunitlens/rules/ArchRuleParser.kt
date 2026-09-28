@@ -152,6 +152,9 @@ object ArchRuleParser {
             }
             return ExactHandlerDecision.Unsupported(stableReason)
         }
+        exactHandlerPackagePatternReason(family, calls)?.let { reason ->
+            return ExactHandlerDecision.Unsupported(reason)
+        }
 
         val rule = when (family) {
             ExactHandlerFamily.PACKAGE_DEPENDENCY_BAN -> parsePackageDependencyBan(source, calls)
@@ -165,6 +168,34 @@ object ArchRuleParser {
         }
         return rule?.let(ExactHandlerDecision::Matched)
             ?: ExactHandlerDecision.Unsupported(calls.unresolvedReason())
+    }
+
+    private fun exactHandlerPackagePatternReason(
+        family: ExactHandlerFamily,
+        calls: List<RawCall>,
+    ): UnsupportedReason? {
+        val packageCalls = when (family) {
+            ExactHandlerFamily.PACKAGE_DEPENDENCY_BAN,
+            ExactHandlerFamily.CLASS_NAME_SUFFIX,
+            ExactHandlerFamily.FORBIDDEN_ANNOTATION,
+            ->
+                calls.filter { it.name == "resideInAPackage" || it.name == "resideInAnyPackage" }
+
+            else -> return null
+        }
+
+        for (call in packageCalls) {
+            val unsupportedPattern = call.arguments
+                .filterIsInstance<RawArgument.StringLiteral>()
+                .firstOrNull { !PackagePattern.isSupported(it.value) }
+                ?: continue
+            return UnsupportedReason.UnsupportedArgument(
+                call.name,
+                unsupportedPattern.position,
+                "unsupported package pattern '${unsupportedPattern.value}'",
+            )
+        }
+        return null
     }
 
     private fun parseConvention(

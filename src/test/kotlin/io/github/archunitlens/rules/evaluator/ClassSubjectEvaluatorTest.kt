@@ -35,9 +35,9 @@ class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
         assertTrue(ClassSubjectEvaluator.appliesToPackage(rule, "com.example.application.order"))
         assertTrue(ClassSubjectEvaluator.appliesToPackage(rule, "com.example.domain.order"))
         assertFalse(ClassSubjectEvaluator.appliesToPackage(rule, "com.example.presentation"))
-        assertEquals("..adapter..", ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, "com.example.adapter.HttpClient"))
-        assertEquals("..infrastructure..", ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, "com.example.infrastructure.JpaRepository"))
-        assertNull(ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, "com.example.domain.Order"))
+        assertEquals("..adapter..", ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, "com.example.adapter"))
+        assertEquals("..infrastructure..", ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, "com.example.infrastructure"))
+        assertNull(ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, "com.example.domain"))
     }
 
     fun testEvaluatesClassNameAndAssignableConditionsWithoutExecutingRules() {

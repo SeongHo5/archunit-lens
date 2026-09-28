@@ -80,8 +80,8 @@ object ClassSubjectEvaluator {
 
     fun matchedForbiddenDependencyPattern(
         rule: PackageDependencyBanRule,
-        targetQualifiedName: String,
-    ): String? = rule.forbiddenPackagePatterns.firstOrNull { PackagePattern.matches(it, targetQualifiedName) }
+        targetPackageName: String,
+    ): String? = rule.forbiddenPackagePatterns.firstOrNull { PackagePattern.matches(it, targetPackageName) }
 
     fun isMissingRequiredSuffix(
         aClass: PsiClass,

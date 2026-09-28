@@ -65,15 +65,30 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             .filter { it.isEnabledBy(settings) }
 
         val dependencyRules = rules.filterIsInstance<PackageDependencyBanRule>()
-        val forbiddenExplicitImports: Set<String> = javaFile.importList
-            ?.allImportStatements
-            ?.asSequence()
-            ?.filterIsInstance<PsiImportStatement>()
-            ?.filterNot { it.isOnDemand }
-            ?.mapNotNull { it.qualifiedName }
-            ?.filter { importedName -> dependencyRules.any { ClassSubjectEvaluator.matchedForbiddenDependencyPattern(it, importedName) != null } }
-            ?.toSet()
-            .orEmpty()
+        val dependencyChecksAllowedAtBuild = dependencyRules.isNotEmpty() && !DumbService.isDumb(holder.project)
+        val forbiddenImportMatches: Map<String, ForbiddenDependencyMatch> = if (!dependencyChecksAllowedAtBuild) {
+            emptyMap()
+        } else {
+            javaFile.importList
+                ?.allImportStatements
+                ?.asSequence()
+                ?.filterIsInstance<PsiImportStatement>()
+                ?.filterNot { it.isOnDemand }
+                ?.mapNotNull { statement ->
+                    val importName = statement.qualifiedName ?: return@mapNotNull null
+                    val importedClass = statement.resolve() as? PsiClass ?: return@mapNotNull null
+                    val importedName = importedClass.qualifiedName ?: return@mapNotNull null
+                    val targetPackageName = importedClass.dependencyPackageName() ?: return@mapNotNull null
+                    dependencyRules.firstNotNullOfOrNull { rule ->
+                        ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, targetPackageName)?.let { pattern ->
+                            importName to ForbiddenDependencyMatch(rule, importedName, pattern, "import")
+                        }
+                    }
+                }
+                ?.toMap()
+                .orEmpty()
+        }
+        val forbiddenExplicitImports = forbiddenImportMatches.values.mapTo(mutableSetOf()) { it.targetQualifiedName }
         val suffixRules = rules.filterIsInstance<ClassNameSuffixRule>()
         val annotationRules = rules.filterIsInstance<ForbiddenAnnotationRule>()
         val annotationExclusivityRules = rules.filterIsInstance<AnnotationExclusivityRule>()
@@ -169,14 +184,8 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             }
 
             override fun visitImportStatement(statement: PsiImportStatement) {
-                if (statement.isOnDemand) return
-                val importedName = statement.qualifiedName ?: return
-                dependencyRules
-                    .firstNotNullOfOrNull { rule ->
-                        ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, importedName)?.let { pattern ->
-                            ForbiddenDependencyMatch(rule, importedName, pattern, "import")
-                        }
-                    }
+                if (!dependencyChecksAllowedAtBuild || DumbService.isDumb(holder.project) || statement.isOnDemand) return
+                forbiddenImportMatches[statement.qualifiedName]
                     ?.let { match ->
                         val violation = ArchUnitViolation.ForbiddenDependency(
                             rule = match.rule,
@@ -193,15 +202,16 @@ class ArchUnitLensInspection : LocalInspectionTool() {
             }
 
             override fun visitReferenceElement(reference: PsiJavaCodeReferenceElement) {
-                if (dependencyRules.isEmpty()) return
+                if (!dependencyChecksAllowedAtBuild || DumbService.isDumb(holder.project)) return
                 if (PsiTreeUtil.getParentOfType(reference, PsiImportStatement::class.java) != null) return
                 val targetClass = reference.resolve() as? PsiClass ?: return
                 val targetQualifiedName = targetClass.qualifiedName ?: return
+                val targetPackageName = targetClass.dependencyPackageName() ?: return
                 if (targetQualifiedName in forbiddenExplicitImports) return
 
                 dependencyRules
                     .firstNotNullOfOrNull { rule ->
-                        ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, targetQualifiedName)?.let { pattern ->
+                        ClassSubjectEvaluator.matchedForbiddenDependencyPattern(rule, targetPackageName)?.let { pattern ->
                             ForbiddenDependencyMatch(rule, targetQualifiedName, pattern, "reference")
                         }
                     }
@@ -427,6 +437,8 @@ private fun PsiClass.hasImplicitOrdinaryConstructor(): Boolean = nameIdentifier 
     !isEnum &&
     !isRecord &&
     PsiTreeUtil.getParentOfType(this, PsiMethod::class.java) == null
+
+private fun PsiClass.dependencyPackageName(): String? = (containingFile as? PsiJavaFile)?.packageName
 
 private data class ForbiddenDependencyMatch(
     val rule: PackageDependencyBanRule,
