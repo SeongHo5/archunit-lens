@@ -14,6 +14,7 @@ exact <code>noClasses()</code> field access, signature-aware method call, constr
 <code>and()</code>/<code>or()</code>, condition <code>andShould()</code>, code-access의 left-associative <code>andShould()</code>/<code>orShould()</code>를 live warning으로 평가합니다.
 </p>
 <p>
+소스의 non-static member constructor는 바로 바깥 클래스 타입을 첫 JVM parameter로 포함합니다. compiled inner constructor의 시그니처를 확정할 수 없으면 warning을 만들지 않습니다.
 Package scope는 literal/Java 상수 <code>@AnalyzeClasses(packages = ...)</code>와 해석 가능한
 <code>packagesOf</code> class literal의 package를 합칩니다. bare annotation이나 빈 배열은 annotation을 붙인 클래스의 package를 사용합니다.
 해석할 수 없는 범위 원소, 비어 있지 않은 location provider/import option/개별 클래스, 전체 classpath import가 있으면
