@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-09
+
+Patch release focused on accurate ArchUnit scope and bytecode-aligned rule matching, with fresh editor diagnostics and rule overviews.
+
 ### Fixed
 
 - Followed Java editor selection in Current file only Rule Overview, rejecting stale refreshes during rapid switches and restoring project-wide scope when no Java editor is selected.
