@@ -39,6 +39,8 @@ class ArchUnitLensSettings : PersistentStateComponent<ArchUnitLensSettingsState>
         currentState = updated
         if (inspectionsChanged || discoveryChanged) {
             ProjectManager.getInstance().openProjects.filterNot { it.isDisposed }.forEach {
+                // Keep the no-argument overload for IntelliJ 2025.2 compatibility; restart(reason) was added in 2025.3.
+                // Switch to the reason overload when the minimum supported platform is raised to 253.
                 DaemonCodeAnalyzer.getInstance(it).restart()
             }
         }

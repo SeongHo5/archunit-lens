@@ -203,24 +203,11 @@ internal object MemberSubjectEvaluator {
     private fun conditionResult(satisfied: Boolean, violation: MemberConditionViolation): ConditionResult = ConditionResult(satisfied, if (satisfied) emptyList() else listOf(violation))
 
     private fun PsiAnnotation.matches(qualifiedName: String, metaAnnotated: Boolean): Boolean? {
+        if (metaAnnotated) return MetaAnnotationFacts.matches(this, qualifiedName)
         val annotationClass = resolveAnnotationType()
             ?: this.qualifiedName?.let { JavaPsiFacade.getInstance(project).findClass(it, resolveScope) }
             ?: return null
-        if (annotationClass.qualifiedName == qualifiedName) return true
-        if (!metaAnnotated) return false
-        return annotationClass.modifierList?.annotations.orEmpty()
-            .map { it.matchesMetaAnnotation(qualifiedName, mutableSetOf()) }.combinedAnnotationMatch()
-    }
-
-    private fun PsiAnnotation.matchesMetaAnnotation(qualifiedName: String, visited: MutableSet<String>): Boolean? {
-        val annotationClass = resolveAnnotationType()
-            ?: this.qualifiedName?.let { JavaPsiFacade.getInstance(project).findClass(it, resolveScope) }
-            ?: return null
-        val current = annotationClass.qualifiedName ?: return false
-        if (!visited.add(current)) return false
-        if (current == qualifiedName) return true
-        return annotationClass.modifierList?.annotations.orEmpty()
-            .map { it.matchesMetaAnnotation(qualifiedName, visited) }.combinedAnnotationMatch()
+        return annotationClass.qualifiedName == qualifiedName
     }
 
     private fun List<Boolean?>.combinedAnnotationMatch(): Boolean? = when {

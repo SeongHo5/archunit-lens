@@ -17,6 +17,96 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class ArchRuleProjectServiceTest : BasePlatformTestCase() {
+    override fun setUp() {
+        super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
+    }
+
+    fun testArchIgnoreChangesRefreshWarmDiscoveryAndPackageCaches() {
+        addArchIgnoreAnnotation()
+        val initialSource = testData("archIgnore/MutableRules.java")
+        val ruleFile = addArchitectureRules("MutableRules.java", initialSource)
+        val service = project.service<ArchRuleProjectService>()
+        val documentManager = PsiDocumentManager.getInstance(project)
+        val document = documentManager.getDocument(ruleFile) ?: error("Expected rule document")
+        fun assertRules(expected: List<String>) {
+            assertEquals(expected, service.discoveries().map { it.ruleName })
+            assertEquals(expected, service.rulesForPackage("com.example.active").map { it.ruleName })
+            assertEquals(expected, service.discoveriesForPackage("com.example.active").map { it.ruleName })
+        }
+        fun updateSource(source: String) {
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(source)
+                documentManager.commitDocument(document)
+            }
+        }
+
+        val activeRules = listOf("mutable_rule", "active_sibling")
+        assertRules(activeRules)
+        updateSource(initialSource.replace("// FIELD_IGNORE", "@ArchIgnore"))
+        assertRules(listOf("active_sibling"))
+        updateSource(initialSource)
+        assertRules(activeRules)
+        updateSource(initialSource.replace("// CLASS_IGNORE", "@ArchIgnore"))
+        assertRules(emptyList())
+        updateSource(initialSource)
+        assertRules(activeRules)
+    }
+
+    fun testArchIgnoreRemainsDisabledAfterDiscoverySettingsRefresh() {
+        addArchIgnoreAnnotation()
+        addArchitectureRules("Rules.java", testData("archIgnore/Rules.java"))
+        val service = project.service<ArchRuleProjectService>()
+        val state = service<ArchUnitLensSettings>().state
+        val original = state.excludedPathFragments
+        try {
+            state.excludedPathFragments = ""
+            assertEquals(listOf("active_sibling", "active_nested"), service.discoveries().map { it.ruleName })
+            assertEquals(
+                listOf("active_sibling", "active_nested"),
+                service.rulesForPackage("com.example.ignoredfield").map { it.ruleName },
+            )
+            state.excludedPathFragments = "Rules.java"
+            assertTrue(service.discoveries().isEmpty())
+            state.excludedPathFragments = ""
+            assertEquals(listOf("active_sibling", "active_nested"), service.discoveries().map { it.ruleName })
+            assertEquals(
+                listOf("active_sibling", "active_nested"),
+                service.rulesForPackage("com.example.ignoredclass").map { it.ruleName },
+            )
+        } finally {
+            state.excludedPathFragments = original
+        }
+    }
+
+    fun testArchIgnoreResolutionChangesInvalidateUnchangedRuleFileCache() {
+        val realAnnotation = addArchIgnoreAnnotation()
+        val sourceRoot = myFixture.tempDirFixture.getFile("src/test/java") ?: error("Expected Java source root")
+        PsiTestUtil.addSourceRoot(module, sourceRoot)
+        addArchitectureRules("WildcardRules.java", testData("archIgnore/WildcardRules.java"))
+        val service = project.service<ArchRuleProjectService>()
+        assertTrue(service.discoveries().isEmpty())
+        assertTrue(service.rulesForPackage("com.example.active").isEmpty())
+
+        WriteCommandAction.runWriteCommandAction(project) { realAnnotation.delete() }
+        val unrelatedAnnotation = myFixture.addFileToProject(
+            "src/test/java/com/example/fake/ArchIgnore.java",
+            testData("archIgnore/UnrelatedArchIgnore.java"),
+        )
+        assertEquals(listOf("wildcard_rule"), service.discoveries().map { it.ruleName })
+        assertEquals(listOf("wildcard_rule"), service.rulesForPackage("com.example.active").map { it.ruleName })
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+
+        WriteCommandAction.runWriteCommandAction(project) { unrelatedAnnotation.delete() }
+        addArchIgnoreAnnotation()
+        assertTrue(service.discoveries().isEmpty())
+        assertTrue(service.rulesForPackage("com.example.active").isEmpty())
+    }
+
+    private fun addArchIgnoreAnnotation(): PsiFile = myFixture.addFileToProject(
+        "src/test/java/com/tngtech/archunit/junit/ArchIgnore.java",
+        testData("archIgnore/ArchIgnore.java"),
+    )
     fun testDiscoveriesRequireReadAccess() {
         val service = project.service<ArchRuleProjectService>()
         val executor = Executors.newSingleThreadExecutor()
@@ -67,7 +157,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         }
     }
 
-    fun testDiscoverySkipsOrdinaryJavaFilesAndReusesUnchangedRuleFileCache() {
+    fun testDiscoverySkipsOrdinaryJavaFilesAndRevalidatesUnchangedRuleEntryPointOwnership() {
         addArchitectureRules(
             "ArchitectureRules.java",
             """
@@ -117,10 +207,10 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         val secondScan = service.scanMetrics()
         assertEquals(1, secondScan.indexedJavaCandidateFiles)
         assertEquals(1, secondScan.archRuleCandidateFiles)
-        assertEquals(0, secondScan.parsedRuleCandidateFiles)
+        assertEquals(1, secondScan.parsedRuleCandidateFiles)
     }
 
-    fun testDiscoveryParsesOnlyNewRuleCandidateAfterCacheWarmup() {
+    fun testDiscoveryRevalidatesExistingRuleOwnershipWhenNewCandidateAppears() {
         addArchitectureRules(
             "ArchitectureRules.java",
             """
@@ -160,7 +250,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         val secondScan = service.scanMetrics()
         assertEquals(2, secondScan.indexedJavaCandidateFiles)
         assertEquals(2, secondScan.archRuleCandidateFiles)
-        assertEquals(1, secondScan.parsedRuleCandidateFiles)
+        assertEquals(2, secondScan.parsedRuleCandidateFiles)
     }
 
     fun testDiscoveryReparsesEditedRuleCandidateBeforeFileSave() {
@@ -277,6 +367,74 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertTrue(service.rulesForPackage("com.other.controller").isEmpty())
     }
 
+    fun testAnalyzeClassesScopesPreservePackageLookupBoundaries() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        val service = project.service<ArchRuleProjectService>()
+        val ruleFile = addArchitectureRules("ArchitectureRules.java", testData("archrules/analyzeScopeLiteral.java"))
+        val document = PsiDocumentManager.getInstance(project).getDocument(ruleFile) ?: error("Expected rule document")
+        val cases = mapOf(
+            "analyzeScopeLiteral" to "com.allowed",
+            "analyzeScopeConstant" to "com.allowed",
+            "analyzeScopeBare" to "com.rules",
+            "analyzeScopeEmpty" to "com.rules",
+            "analyzeScopePackagesOf" to "com.allowed.domain",
+        )
+        cases.forEach { (fixture, packageName) ->
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(testData("archrules/$fixture.java"))
+                PsiDocumentManager.getInstance(project).commitDocument(document)
+            }
+            assertEquals(fixture, 1, service.rulesForPackage(packageName).size)
+            assertEquals(fixture, 1, service.rulesForPackage("$packageName.child").size)
+            assertTrue(fixture, service.rulesForPackage("${packageName}Other").isEmpty())
+            assertTrue(fixture, service.rulesForPackage("com.outside").isEmpty())
+        }
+    }
+
+    fun testAnalyzeClassesUnknownScopeRetainsDiscoveryWithoutPackageWarnings() {
+        addArchitectureRules("ArchitectureRules.java", testData("archrules/analyzeScopeUnknownPackages.java"))
+        val service = project.service<ArchRuleProjectService>()
+        val discovery = service.discoveries().single()
+        assertNull(discovery.liveRule)
+        assertEquals(AnalyzeScope.Unknown, discovery.descriptor.scope)
+        assertTrue(service.rulesForPackage("com.allowed").isEmpty())
+        assertTrue(service.rulesForPackage("com.outside").isEmpty())
+        assertTrue(service.discoveriesForPackage("com.allowed").isEmpty())
+    }
+
+    fun testAnalyzeClassesExternalConstantEditInvalidatesRuleAndPackageCaches() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        val constants = myFixture.addFileToProject("com/rules/ScopeConstants.java", testData("archrules/analyzeScopeConstants.java"))
+        addArchitectureRules("ArchitectureRules.java", testData("archrules/analyzeScopeExternalConstant.java"))
+        val service = project.service<ArchRuleProjectService>()
+        assertEquals(1, service.rulesForPackage("com.allowed").size)
+        assertTrue(service.rulesForPackage("com.changed").isEmpty())
+        val document = PsiDocumentManager.getInstance(project).getDocument(constants) ?: error("Expected constants document")
+        WriteCommandAction.runWriteCommandAction(project) {
+            document.setText(testData("archrules/analyzeScopeConstants.java").replace("com.allowed", "com.changed"))
+            PsiDocumentManager.getInstance(project).commitDocument(document)
+        }
+        assertTrue(service.rulesForPackage("com.allowed").isEmpty())
+        assertEquals(1, service.rulesForPackage("com.changed").size)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
+    fun testAnalyzeClassesPackageRootEditInvalidatesProvenScope() {
+        val anchor = myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        addArchitectureRules("ArchitectureRules.java", testData("archrules/analyzeScopePackagesOf.java"))
+        val service = project.service<ArchRuleProjectService>()
+        assertEquals(1, service.rulesForPackage("com.allowed.domain").size)
+        val document = PsiDocumentManager.getInstance(project).getDocument(anchor) ?: error("Expected anchor document")
+        WriteCommandAction.runWriteCommandAction(project) {
+            document.setText(testData("archrules/analyzeScopeAnchor.java").replace("com.allowed.domain", "com.changed"))
+            PsiDocumentManager.getInstance(project).commitDocument(document)
+        }
+        assertTrue(service.rulesForPackage("com.allowed.domain").isEmpty())
+        assertNull(service.discoveries().single().liveRule)
+        assertEquals(AnalyzeScope.Unknown, service.discoveries().single().descriptor.scope)
+    }
+
     fun testDiscoveriesForPackageRetainsUnsupportedMetadataByAnalyzeScope() {
         addArchitectureRules(
             "ArchitectureRules.java",
@@ -374,7 +532,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(setOf("initial_records", "new_records"), service.discoveries().map { it.ruleName }.toSet())
     }
 
-    fun testInlineMultiPackageClassRuleDoesNotBecomeResolutionDependent() {
+    fun testInlineMultiPackageClassRuleRevalidatesEntryPointOwnershipAfterJavaChanges() {
         addArchitectureRules(
             "ArchitectureRules.java",
             """
@@ -396,7 +554,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         )
 
         assertEquals(listOf("inline_packages"), service.discoveries().map { it.ruleName })
-        assertEquals(0, service.scanMetrics().parsedRuleCandidateFiles)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
     }
 
     fun testCommentedClassLiteralReparsesWhenTargetAppearsAfterCacheWarmup() {
@@ -479,7 +637,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
     }
 
-    fun testClassAnnotationStringRuleKeepsCandidateCacheAcrossUnrelatedPsiChanges() {
+    fun testClassAnnotationStringRuleRevalidatesEntryPointOwnershipAfterJavaChanges() {
         addArchitectureRules(
             "ClassRules.java",
             """
@@ -502,7 +660,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         )
 
         assertEquals(1, service.discoveries().size)
-        assertEquals(0, service.scanMetrics().parsedRuleCandidateFiles)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
     }
 
     fun testSpacedAssignableCallReparsesWhenTargetDisappearsAfterCacheWarmup() {
