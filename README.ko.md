@@ -94,7 +94,7 @@ ArchUnit Lens는 ArchUnit rule이나 사용자/프로젝트 코드를 실행하�
 
 ## 설정
 
-**Settings | Tools | ArchUnit Lens**에서 rule family별 enable/disable, overview 표시, scan exclusion, 진단, metrics logging을 설정합니다. Inspection severity는 IntelliJ inspection profile을 기준으로 유지합니다.
+**Settings | Tools | ArchUnit Lens**에서 rule family별 enable/disable, overview 표시, scan exclusion, 진단, metrics logging을 설정합니다. 설정은 열린 프로젝트 전체에 적용됩니다. Rule family나 scan exclusion 설정을 적용하면 소스를 수정하지 않아도 활성 편집기의 진단이 갱신됩니다. 이미 열린 Rule Overview 패널의 표시·진단 필터도 동기화되며 scan exclusion이 바뀌면 목록을 갱신합니다. Inspection severity는 IntelliJ inspection profile을 기준으로 유지합니다.
 
 ## 호환성과 로컬 개발
 

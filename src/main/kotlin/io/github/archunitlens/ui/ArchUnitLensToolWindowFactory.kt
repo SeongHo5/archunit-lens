@@ -1,5 +1,6 @@
 package io.github.archunitlens.ui
 
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.ReadAction
@@ -21,7 +22,9 @@ import com.intellij.util.concurrency.AppExecutorUtil
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.DiscoveredArchRule
+import io.github.archunitlens.settings.ARCH_UNIT_LENS_SETTINGS_CHANGED
 import io.github.archunitlens.settings.ArchUnitLensSettings
+import io.github.archunitlens.settings.ArchUnitLensSettingsListener
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.datatransfer.StringSelection
@@ -55,14 +58,19 @@ class ArchUnitLensToolWindowFactory : ToolWindowFactory {
             ArchUnitLensBundle.message("toolwindow.content.rules"),
             false,
         )
+        content.setDisposer(panel)
         content.preferredFocusableComponent = panel.preferredFocusComponent
         toolWindow.contentManager.addContent(content)
     }
 }
 
-private class ArchUnitLensRuleOverviewPanel(
+/**
+ * Keeps one overview synchronized with application preferences for its content lifetime.
+ */
+internal class ArchUnitLensRuleOverviewPanel(
     private val project: Project,
-) : JPanel(BorderLayout()) {
+) : JPanel(BorderLayout()),
+    Disposable {
     private val searchField = JBTextField(SEARCH_FIELD_COLUMNS).apply {
         emptyText.text = ArchUnitLensBundle.message("toolwindow.search.placeholder")
     }
@@ -86,6 +94,7 @@ private class ArchUnitLensRuleOverviewPanel(
     private val refreshDebounceTimer = Timer(REFRESH_DEBOUNCE_MILLIS) { runRefresh(refreshGeneration) }.apply {
         isRepeats = false
     }
+    private var disposed = false
     private var refreshGeneration = 0
     private var latestOverviewText: String = ArchUnitLensBundle.message("toolwindow.loading")
     private var latestCurrentPackage: String? = null
@@ -107,8 +116,7 @@ private class ArchUnitLensRuleOverviewPanel(
         copyDiagnosticsButton.addActionListener { copyOverviewDiagnostics() }
         listOf(showSupported, showUnsupported, showDiagnostics).forEach { checkbox ->
             checkbox.addActionListener {
-                persistOverviewSettings()
-                refresh()
+                persistOverviewSetting(checkbox)
             }
         }
         currentFileOnly.addActionListener { refresh() }
@@ -118,7 +126,20 @@ private class ArchUnitLensRuleOverviewPanel(
             override fun changedUpdate(event: DocumentEvent) = scheduleRefresh()
         })
         ruleList.addListSelectionListener { updateDetails() }
+        project.messageBus.connect(this).subscribe(
+            ARCH_UNIT_LENS_SETTINGS_CHANGED,
+            ArchUnitLensSettingsListener {
+                resetFiltersFromSettings()
+                refresh()
+            },
+        )
         refresh()
+    }
+
+    override fun dispose() {
+        disposed = true
+        refreshGeneration++
+        refreshDebounceTimer.stop()
     }
 
     private fun toolbar(): JPanel = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
@@ -136,6 +157,7 @@ private class ArchUnitLensRuleOverviewPanel(
     private fun refresh() = scheduleRefresh(immediate = true)
 
     private fun scheduleRefresh(immediate: Boolean = false) {
+        if (disposed || project.isDisposed) return
         refreshGeneration++
         if (immediate) {
             refreshDebounceTimer.stop()
@@ -151,10 +173,11 @@ private class ArchUnitLensRuleOverviewPanel(
             readRuleOverviewSnapshot(request)
         }
             .inSmartMode(project)
-            .expireWith(project)
+            .expireWith(this)
+            .expireWhen { project.isDisposed }
             .coalesceBy(refreshCoalesceKey)
             .finishOnUiThread(ModalityState.defaultModalityState()) { snapshot ->
-                if (generation == refreshGeneration) {
+                if (!disposed && generation == refreshGeneration) {
                     applySnapshot(snapshot)
                 }
             }
@@ -221,11 +244,14 @@ private class ArchUnitLensRuleOverviewPanel(
         showDiagnostics.isSelected = state.showDiagnosticsInOverview
     }
 
-    private fun persistOverviewSettings() {
-        val state = service<ArchUnitLensSettings>().state
-        state.showSupportedRulesInOverview = showSupported.isSelected
-        state.showUnsupportedRulesInOverview = showUnsupported.isSelected
-        state.showDiagnosticsInOverview = showDiagnostics.isSelected
+    private fun persistOverviewSetting(checkbox: JCheckBox) {
+        service<ArchUnitLensSettings>().update { state ->
+            when (checkbox) {
+                showSupported -> state.showSupportedRulesInOverview = checkbox.isSelected
+                showUnsupported -> state.showUnsupportedRulesInOverview = checkbox.isSelected
+                showDiagnostics -> state.showDiagnosticsInOverview = checkbox.isSelected
+            }
+        }
     }
 
     private fun openSelectedRuleSource() {

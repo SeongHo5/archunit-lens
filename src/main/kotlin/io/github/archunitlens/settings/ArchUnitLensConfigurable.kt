@@ -89,17 +89,18 @@ class ArchUnitLensConfigurable : Configurable {
     }
 
     override fun apply() {
-        val state = service<ArchUnitLensSettings>().state
-        state.classNamingRulesEnabled = classNamingRules.isSelected
-        state.dependencyRulesEnabled = dependencyRules.isSelected
-        state.annotationRulesEnabled = annotationRules.isSelected
-        state.interfaceRulesEnabled = interfaceRules.isSelected
-        state.memberDeclarationRulesEnabled = memberDeclarationRules.isSelected
-        state.showSupportedRulesInOverview = showSupported.isSelected
-        state.showUnsupportedRulesInOverview = showUnsupported.isSelected
-        state.showDiagnosticsInOverview = showDiagnostics.isSelected
-        state.metricsLoggingEnabled = metricsLogging.isSelected
-        state.excludedPathFragments = excludedPaths.text.trim()
+        service<ArchUnitLensSettings>().update { state ->
+            state.classNamingRulesEnabled = classNamingRules.isSelected
+            state.dependencyRulesEnabled = dependencyRules.isSelected
+            state.annotationRulesEnabled = annotationRules.isSelected
+            state.interfaceRulesEnabled = interfaceRules.isSelected
+            state.memberDeclarationRulesEnabled = memberDeclarationRules.isSelected
+            state.showSupportedRulesInOverview = showSupported.isSelected
+            state.showUnsupportedRulesInOverview = showUnsupported.isSelected
+            state.showDiagnosticsInOverview = showDiagnostics.isSelected
+            state.metricsLoggingEnabled = metricsLogging.isSelected
+            state.excludedPathFragments = excludedPaths.text.trim()
+        }
     }
 
     override fun reset() {
