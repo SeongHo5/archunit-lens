@@ -67,6 +67,8 @@ Live rule은 진입점 static method의 선언 소유자가 `com.tngtech.archuni
 
 오른쪽 tool window bar에서 **ArchUnit Lens**를 열면 발견된 rule을 확인할 수 있습니다. overview에는 지원/미지원 rule field filter, rule 이름 검색, source navigation, 현재 파일 기준 보기, subject/unsupported reason grouping, reason, scan metrics, package cache metrics, indexing/stale fallback 진단이 표시됩니다.
 
+**Current file only**를 켜면 선택한 Java 편집기를 자동으로 따라가며 해당 package에 적용되는 rule을 표시합니다. Java가 아닌 파일을 선택하거나 모든 편집기를 닫으면 전체 프로젝트 rule을 표시하고 선택한 Java package가 없음을 표시합니다.
+
 ![Rule Overview의 signature-aware code-access rule](docs/images/issue-50-signature-code-access-overview.png)
 
 ## Quick Fix

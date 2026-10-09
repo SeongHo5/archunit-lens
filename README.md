@@ -67,6 +67,8 @@ An unresolved scope value makes the whole rule metadata-only; mixed arrays never
 
 Open **ArchUnit Lens** from the right tool window bar to review discovered rules. The overview shows supported and unsupported rule fields with filters, rule-name search, source navigation, current-file-only scope, subject/unsupported-reason grouping, reason text, scan metrics, package cache metrics, and indexing/stale fallback diagnostics.
 
+With **Current file only** enabled, the overview automatically follows the selected Java editor and shows rules applicable to its package. Selecting a non-Java file or closing all editors shows all project rules and reports that no Java package is selected.
+
 ![Signature-aware code-access rules in Rule Overview](docs/images/issue-50-signature-code-access-overview.png)
 
 ## Quick fixes

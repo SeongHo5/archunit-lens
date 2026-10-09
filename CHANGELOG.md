@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Followed Java editor selection in Current file only Rule Overview, rejecting stale refreshes during rapid switches and restoring project-wide scope when no Java editor is selected.
 - Refreshed active editor diagnostics and existing Rule Overview panels when settings are applied, and synchronized overview filters without restoring stale preferences.
 - Excluded rules disabled by ArchUnit `@ArchIgnore` on fields or declaring test classes from live warnings and Rule Overview, refreshing cached discovery after ignore edits and annotation resolution changes.
 - Excluded SOURCE-retained applied and intermediate annotations from live class/member meta-annotation facts and removal fixes, preserving CLASS/RUNTIME and default CLASS paths.

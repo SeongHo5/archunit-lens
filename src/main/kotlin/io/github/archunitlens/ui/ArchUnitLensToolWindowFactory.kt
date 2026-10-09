@@ -6,6 +6,8 @@ import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
@@ -65,7 +67,7 @@ class ArchUnitLensToolWindowFactory : ToolWindowFactory {
 }
 
 /**
- * Keeps one overview synchronized with application preferences for its content lifetime.
+ * Keeps one overview synchronized with preferences and the selected editor for its content lifetime.
  */
 internal class ArchUnitLensRuleOverviewPanel(
     private val project: Project,
@@ -95,7 +97,10 @@ internal class ArchUnitLensRuleOverviewPanel(
         isRepeats = false
     }
     private var disposed = false
+
+    @Volatile
     private var refreshGeneration = 0
+
     private var latestOverviewText: String = ArchUnitLensBundle.message("toolwindow.loading")
     private var latestCurrentPackage: String? = null
 
@@ -126,7 +131,16 @@ internal class ArchUnitLensRuleOverviewPanel(
             override fun changedUpdate(event: DocumentEvent) = scheduleRefresh()
         })
         ruleList.addListSelectionListener { updateDetails() }
-        project.messageBus.connect(this).subscribe(
+        val connection = project.messageBus.connect(this)
+        connection.subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun selectionChanged(event: FileEditorManagerEvent) {
+                    if (currentFileOnly.isSelected) refresh()
+                }
+            },
+        )
+        connection.subscribe(
             ARCH_UNIT_LENS_SETTINGS_CHANGED,
             ArchUnitLensSettingsListener {
                 resetFiltersFromSettings()
@@ -174,7 +188,7 @@ internal class ArchUnitLensRuleOverviewPanel(
         }
             .inSmartMode(project)
             .expireWith(this)
-            .expireWhen { project.isDisposed }
+            .expireWhen { project.isDisposed || generation != refreshGeneration }
             .coalesceBy(refreshCoalesceKey)
             .finishOnUiThread(ModalityState.defaultModalityState()) { snapshot ->
                 if (!disposed && generation == refreshGeneration) {
