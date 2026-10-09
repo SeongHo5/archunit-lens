@@ -1,5 +1,11 @@
 # ArchUnit Lens Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Refreshed active editor diagnostics and existing Rule Overview panels when settings are applied, and synchronized overview filters without restoring stale preferences.
+
 ## [0.3.1] - 2026-09-29
 
 Patch release focused on accurate package-rule feedback, fresh rule discoveries, and safe rename previews.

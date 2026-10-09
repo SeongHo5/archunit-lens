@@ -89,7 +89,7 @@ ArchUnit Lens does not execute ArchUnit rules or user/project code. It intention
 
 ## Settings
 
-Use **Settings | Tools | ArchUnit Lens** for per-rule-family enable/disable, overview visibility, scan exclusions, diagnostics, and metrics logging. Inspection severity remains controlled by IntelliJ inspection profiles.
+Use **Settings | Tools | ArchUnit Lens** for per-rule-family enable/disable, overview visibility, scan exclusions, diagnostics, and metrics logging. Preferences apply across open projects. Applying rule-family or scan-exclusion settings refreshes active editor diagnostics without editing source files. Existing Rule Overview panels synchronize visibility and diagnostic filters and refresh when scan exclusions change. Inspection severity remains controlled by IntelliJ inspection profiles.
 
 ## Compatibility and local development
 

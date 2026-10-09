@@ -1,10 +1,14 @@
 package io.github.archunitlens.settings
 
+import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.RoamingType
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
+import com.intellij.openapi.project.ProjectManager
+import com.intellij.util.messages.Topic
 
 /**
  * Persistent user preferences for ArchUnit Lens inspections and rule overview.
@@ -15,12 +19,32 @@ import com.intellij.openapi.components.Storage
     storages = [Storage(value = "archUnitLens.xml", roamingType = RoamingType.DISABLED)],
 )
 class ArchUnitLensSettings : PersistentStateComponent<ArchUnitLensSettingsState> {
+    @Volatile
     private var currentState = ArchUnitLensSettingsState()
 
     override fun getState(): ArchUnitLensSettingsState = currentState
 
     override fun loadState(state: ArchUnitLensSettingsState) {
         currentState = state
+    }
+
+    internal fun update(change: (ArchUnitLensSettingsState) -> Unit) {
+        val application = ApplicationManager.getApplication()
+        application.assertIsDispatchThread()
+        val previous = currentState
+        val updated = previous.copy().also(change)
+        val inspectionsChanged = previous.inspectionPreferences() != updated.inspectionPreferences()
+        val discoveryChanged = previous.excludedPathFragments != updated.excludedPathFragments
+        val overviewChanged = previous.overviewPreferences() != updated.overviewPreferences()
+        currentState = updated
+        if (inspectionsChanged || discoveryChanged) {
+            ProjectManager.getInstance().openProjects.filterNot { it.isDisposed }.forEach {
+                DaemonCodeAnalyzer.getInstance(it).restart()
+            }
+        }
+        if (inspectionsChanged || discoveryChanged || overviewChanged) {
+            application.messageBus.syncPublisher(ARCH_UNIT_LENS_SETTINGS_CHANGED).settingsChanged()
+        }
     }
 }
 
@@ -41,3 +65,40 @@ class ArchUnitLensSettingsState {
 }
 
 internal const val DEFAULT_EXCLUDED_PATH_FRAGMENTS = "build/generated,generated"
+
+internal fun interface ArchUnitLensSettingsListener {
+    fun settingsChanged()
+}
+
+@field:Topic.AppLevel
+internal val ARCH_UNIT_LENS_SETTINGS_CHANGED = Topic.create(
+    "ArchUnit Lens settings changed",
+    ArchUnitLensSettingsListener::class.java,
+)
+
+private fun ArchUnitLensSettingsState.inspectionPreferences(): List<Boolean> = listOf(
+    classNamingRulesEnabled,
+    dependencyRulesEnabled,
+    annotationRulesEnabled,
+    interfaceRulesEnabled,
+    memberDeclarationRulesEnabled,
+)
+
+private fun ArchUnitLensSettingsState.overviewPreferences(): List<Boolean> = listOf(
+    showSupportedRulesInOverview,
+    showUnsupportedRulesInOverview,
+    showDiagnosticsInOverview,
+)
+
+private fun ArchUnitLensSettingsState.copy(): ArchUnitLensSettingsState = ArchUnitLensSettingsState().also {
+    it.classNamingRulesEnabled = classNamingRulesEnabled
+    it.dependencyRulesEnabled = dependencyRulesEnabled
+    it.annotationRulesEnabled = annotationRulesEnabled
+    it.interfaceRulesEnabled = interfaceRulesEnabled
+    it.memberDeclarationRulesEnabled = memberDeclarationRulesEnabled
+    it.showSupportedRulesInOverview = showSupportedRulesInOverview
+    it.showUnsupportedRulesInOverview = showUnsupportedRulesInOverview
+    it.showDiagnosticsInOverview = showDiagnosticsInOverview
+    it.metricsLoggingEnabled = metricsLoggingEnabled
+    it.excludedPathFragments = excludedPathFragments
+}

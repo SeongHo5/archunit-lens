@@ -1,5 +1,7 @@
 package io.github.archunitlens.inspections
 
+import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
+import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl
 import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.codeInspection.InspectionManager
@@ -33,13 +35,85 @@ import io.github.archunitlens.rules.SupportStatus
 import io.github.archunitlens.rules.UnsupportedReason
 import io.github.archunitlens.rules.evaluator.ExactCodeAccessEvaluator
 import io.github.archunitlens.rules.evaluator.MemberSubjectEvaluator
+import io.github.archunitlens.settings.ArchUnitLensConfigurable
 import io.github.archunitlens.settings.ArchUnitLensSettings
+import io.github.archunitlens.settings.ArchUnitLensSettingsState
 import java.nio.file.Path
+import javax.swing.JCheckBox
+import javax.swing.JPanel
+import javax.swing.JTextField
 
 class ArchUnitLensInspectionTest : BasePlatformTestCase() {
     override fun setUp() {
         super.setUp()
         myFixture.enableInspections(ArchUnitLensInspection())
+    }
+
+    fun testSettingsApplyRestartsActiveDiagnosticsWithoutSourceEdit() {
+        val settings = service<ArchUnitLensSettings>()
+        val original = settings.state
+        settings.loadState(ArchUnitLensSettingsState())
+        val configurable = ArchUnitLensConfigurable()
+        try {
+            addControllerSuffixRule()
+            configureJavaFixture("UserApi.java", "javaSources/settingsRefresh/UserApi.java")
+            assertEquals(1, warningHighlights().size)
+            val daemon = DaemonCodeAnalyzer.getInstance(project) as DaemonCodeAnalyzerImpl
+            assertTrue(daemon.isAllAnalysisFinished(myFixture.file))
+            val sourceStamp = myFixture.file.modificationStamp
+            val component = configurable.createComponent() as JPanel
+            val naming = component.components.filterIsInstance<JCheckBox>().single {
+                it.text == ArchUnitLensBundle.message("settings.ruleFamily.classNaming")
+            }
+
+            naming.isSelected = false
+            configurable.apply()
+
+            assertFalse(daemon.isAllAnalysisFinished(myFixture.file))
+            assertTrue(warningHighlights().isEmpty())
+            assertEquals(sourceStamp, myFixture.file.modificationStamp)
+
+            naming.isSelected = true
+            configurable.apply()
+            assertFalse(daemon.isAllAnalysisFinished(myFixture.file))
+            assertEquals(1, warningHighlights().size)
+
+            component.components.filterIsInstance<JTextField>().single().text = "src/test/java"
+            configurable.apply()
+            assertFalse(daemon.isAllAnalysisFinished(myFixture.file))
+            assertTrue(warningHighlights().isEmpty())
+            assertEquals(sourceStamp, myFixture.file.modificationStamp)
+        } finally {
+            configurable.disposeUIResources()
+            settings.loadState(original)
+        }
+    }
+
+    fun testPresentationSettingsApplyDoesNotRestartActiveDiagnostics() {
+        val settings = service<ArchUnitLensSettings>()
+        val original = settings.state
+        settings.loadState(ArchUnitLensSettingsState())
+        val configurable = ArchUnitLensConfigurable()
+        try {
+            configureJavaFixture("Plain.java", "javaSources/settingsRefresh/Plain.java")
+            warningHighlights()
+            val daemon = DaemonCodeAnalyzer.getInstance(project) as DaemonCodeAnalyzerImpl
+            assertTrue(daemon.isAllAnalysisFinished(myFixture.file))
+            val component = configurable.createComponent() as JPanel
+            component.components.filterIsInstance<JCheckBox>().single {
+                it.text == ArchUnitLensBundle.message("settings.metrics.logging")
+            }.isSelected = false
+            component.components.filterIsInstance<JCheckBox>().single {
+                it.text == ArchUnitLensBundle.message("settings.overview.showSupported")
+            }.isSelected = false
+
+            configurable.apply()
+
+            assertTrue(daemon.isAllAnalysisFinished(myFixture.file))
+        } finally {
+            configurable.disposeUIResources()
+            settings.loadState(original)
+        }
     }
 
     fun testPackageDependencyBanHighlightsForbiddenImport() {
