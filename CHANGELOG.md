@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Followed Java editor selection in Current file only Rule Overview, rejecting stale refreshes during rapid switches and restoring project-wide scope when no Java editor is selected.
 - Refreshed active editor diagnostics and existing Rule Overview panels when settings are applied, and synchronized overview filters without restoring stale preferences.
 
 ## [0.3.1] - 2026-09-29
