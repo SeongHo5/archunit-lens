@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Required uniquely resolved ArchUnit entry-point ownership before enabling live rules, keeping same-name project helpers and unresolved or ambiguous roots metadata-only.
 - Excluded inlined primitive/String constant field reads from exact access warnings while preserving nonconstant reads and explicit writes.
 
 ## [0.3.1] - 2026-09-29

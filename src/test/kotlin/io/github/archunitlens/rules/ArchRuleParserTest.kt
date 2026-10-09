@@ -7,6 +7,7 @@ import java.nio.file.Path
 class ArchRuleParserTest : BasePlatformTestCase() {
     override fun setUp() {
         super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
         myFixture.addFileToProject(
             "src/test/java/org/springframework/stereotype/Service.java",
             "package org.springframework.stereotype; public @interface Service {}",

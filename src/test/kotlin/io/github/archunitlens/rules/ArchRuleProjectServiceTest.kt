@@ -17,6 +17,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class ArchRuleProjectServiceTest : BasePlatformTestCase() {
+    override fun setUp() {
+        super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
+    }
+
     fun testDiscoveriesRequireReadAccess() {
         val service = project.service<ArchRuleProjectService>()
         val executor = Executors.newSingleThreadExecutor()
@@ -67,7 +72,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         }
     }
 
-    fun testDiscoverySkipsOrdinaryJavaFilesAndReusesUnchangedRuleFileCache() {
+    fun testDiscoverySkipsOrdinaryJavaFilesAndRevalidatesUnchangedRuleEntryPointOwnership() {
         addArchitectureRules(
             "ArchitectureRules.java",
             """
@@ -117,10 +122,10 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         val secondScan = service.scanMetrics()
         assertEquals(1, secondScan.indexedJavaCandidateFiles)
         assertEquals(1, secondScan.archRuleCandidateFiles)
-        assertEquals(0, secondScan.parsedRuleCandidateFiles)
+        assertEquals(1, secondScan.parsedRuleCandidateFiles)
     }
 
-    fun testDiscoveryParsesOnlyNewRuleCandidateAfterCacheWarmup() {
+    fun testDiscoveryRevalidatesExistingRuleOwnershipWhenNewCandidateAppears() {
         addArchitectureRules(
             "ArchitectureRules.java",
             """
@@ -160,7 +165,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         val secondScan = service.scanMetrics()
         assertEquals(2, secondScan.indexedJavaCandidateFiles)
         assertEquals(2, secondScan.archRuleCandidateFiles)
-        assertEquals(1, secondScan.parsedRuleCandidateFiles)
+        assertEquals(2, secondScan.parsedRuleCandidateFiles)
     }
 
     fun testDiscoveryReparsesEditedRuleCandidateBeforeFileSave() {
@@ -374,7 +379,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(setOf("initial_records", "new_records"), service.discoveries().map { it.ruleName }.toSet())
     }
 
-    fun testInlineMultiPackageClassRuleDoesNotBecomeResolutionDependent() {
+    fun testInlineMultiPackageClassRuleRevalidatesEntryPointOwnershipAfterJavaChanges() {
         addArchitectureRules(
             "ArchitectureRules.java",
             """
@@ -396,7 +401,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         )
 
         assertEquals(listOf("inline_packages"), service.discoveries().map { it.ruleName })
-        assertEquals(0, service.scanMetrics().parsedRuleCandidateFiles)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
     }
 
     fun testCommentedClassLiteralReparsesWhenTargetAppearsAfterCacheWarmup() {
@@ -479,7 +484,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
     }
 
-    fun testClassAnnotationStringRuleKeepsCandidateCacheAcrossUnrelatedPsiChanges() {
+    fun testClassAnnotationStringRuleRevalidatesEntryPointOwnershipAfterJavaChanges() {
         addArchitectureRules(
             "ClassRules.java",
             """
@@ -502,7 +507,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         )
 
         assertEquals(1, service.discoveries().size)
-        assertEquals(0, service.scanMetrics().parsedRuleCandidateFiles)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
     }
 
     fun testSpacedAssignableCallReparsesWhenTargetDisappearsAfterCacheWarmup() {

@@ -3,6 +3,10 @@
 <p>
 Reports violations for the conservative ArchUnit rule subset that ArchUnit Lens can statically interpret.
 ArchUnit tests remain the final authority; this inspection is early editor feedback only.
+Live rules require a uniquely resolved static entry-point declaration owned by
+<code>com.tngtech.archunit.lang.syntax.ArchRuleDefinition</code>. Qualified calls and explicit or wildcard
+static imports are supported when their owner resolves. Same-name project helpers and unresolved or ambiguous
+roots remain metadata-only; helper bodies are never interpreted.
 </p>
 <p>
 The canonical support contract lives in <code>docs/rule-support-matrix.md</code>. Current live-warning

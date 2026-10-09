@@ -372,6 +372,7 @@ private const val NANOS_PER_MILLISECOND = 1_000_000
 private fun PsiJavaFile.requiresTypeResolution(): Boolean {
     if (PsiTreeUtil.findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null) return true
     val methodCalls = PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
+    if (methodCalls.any { it.methodExpression.referenceName in ARCHUNIT_SUBJECT_ENTRY_POINTS }) return true
     if (
         methodCalls.any { call ->
             call.methodExpression.referenceName in setOf(
