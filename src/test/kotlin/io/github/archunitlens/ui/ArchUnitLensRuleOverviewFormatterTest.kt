@@ -5,9 +5,15 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.DiscoveredArchRule
+import io.github.archunitlens.rules.addArchUnitEntryPointDeclarations
 import java.nio.file.Path
 
 class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
+    override fun setUp() {
+        super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
+    }
+
     fun testFormatsSupportedAndUnsupportedDiscoveriesWithScanMetrics() {
         myFixture.addFileToProject(
             "src/test/java/java/lang/System.java",
@@ -92,6 +98,22 @@ class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
                 ),
             ),
         )
+    }
+
+    fun testFormatsUnknownAnalyzeClassesScopeAsUnsupportedMetadata() {
+        myFixture.addFileToProject(
+            "src/test/java/com/rules/ArchitectureRules.java",
+            Path.of("src/test/testData/archrules/analyzeScopeUnknownPackages.java").toFile().readText(),
+        )
+        val service = project.service<ArchRuleProjectService>()
+        val output = ArchUnitLensRuleOverviewFormatter.render(
+            discoveries = service.discoveries().toOverviewItems("ArchitectureRules.java"),
+            metrics = service.scanMetrics(),
+        )
+        assertTrue(output.contains("scope_rule"))
+        assertTrue(output.contains(ArchUnitLensBundle.message("overview.scope.unknown")))
+        assertTrue(output.contains("AnalyzeClasses"))
+        assertFalse(output.contains(statusLine(ArchUnitLensBundle.message("overview.status.supported"))))
     }
 
     fun testFormatsSupportedMultiPackageClassConvention() {

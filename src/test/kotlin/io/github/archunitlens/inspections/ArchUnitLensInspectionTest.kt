@@ -4,13 +4,17 @@ import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.codeInspection.InspectionManager
 import com.intellij.codeInspection.ProblemsHolder
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.JavaResolveResult
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiCompiledElement
+import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiField
+import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiMethod
@@ -33,6 +37,7 @@ import io.github.archunitlens.rules.NoClassesCodeAccessRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 import io.github.archunitlens.rules.SupportStatus
 import io.github.archunitlens.rules.UnsupportedReason
+import io.github.archunitlens.rules.addArchUnitEntryPointDeclarations
 import io.github.archunitlens.rules.evaluator.ExactCodeAccessEvaluator
 import io.github.archunitlens.rules.evaluator.MemberSubjectEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
@@ -41,6 +46,7 @@ import java.nio.file.Path
 class ArchUnitLensInspectionTest : BasePlatformTestCase() {
     override fun setUp() {
         super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
         myFixture.enableInspections(ArchUnitLensInspection())
     }
 
@@ -584,6 +590,60 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         )
 
         assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testAnalyzeClassesResolvedScopesWarnOnlyInsideImportedPackages() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        val cases = mapOf(
+            "analyzeScopeLiteral" to listOf("com.allowed"),
+            "analyzeScopeConstant" to listOf("com.allowed"),
+            "analyzeScopeMixedConstants" to listOf("com.literal", "com.allowed", "com.concatenated"),
+            "analyzeScopeBare" to listOf("com.rules"),
+            "analyzeScopeEmpty" to listOf("com.rules"),
+            "analyzeScopePackagesOf" to listOf("com.allowed.domain"),
+            "analyzeScopeCombinedPackages" to listOf("com.literal", "com.allowed.domain", "com.rules"),
+        )
+        val ruleFile = myFixture.addFileToProject("com/rules/ArchitectureRules.java", testData("archrules/analyzeScopeLiteral.java"))
+        val document = PsiDocumentManager.getInstance(project).getDocument(ruleFile) ?: error("Expected rule document")
+        cases.forEach { (fixture, packages) ->
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(testData("archrules/$fixture.java"))
+                PsiDocumentManager.getInstance(project).commitDocument(document)
+            }
+            packages.forEach { packageName ->
+                listOf(packageName, "$packageName.child").forEach {
+                    myFixture.configureByText("Target.java", testData("archrules/analyzeScopeTarget.java").replace("com.scopeTarget", it))
+                    assertEquals("$fixture in $it", 1, warningDescriptions().size)
+                }
+                myFixture.configureByText("Target.java", testData("archrules/analyzeScopeTarget.java").replace("com.scopeTarget", "${packageName}Other"))
+                assertTrue(fixture, warningDescriptions().isEmpty())
+            }
+            myFixture.configureByText("Target.java", testData("archrules/analyzeScopeTarget.java").replace("com.scopeTarget", "com.outside"))
+            assertTrue(fixture, warningDescriptions().isEmpty())
+        }
+    }
+
+    fun testAnalyzeClassesUnknownAndCustomScopesNeverProducePartialWarnings() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        val ruleFile = myFixture.addFileToProject("com/rules/ArchitectureRules.java", testData("archrules/analyzeScopeUnknownPackages.java"))
+        val document = PsiDocumentManager.getInstance(project).getDocument(ruleFile) ?: error("Expected rule document")
+        listOf(
+            "analyzeScopeUnknownPackages", "analyzeScopeMissingPackage", "analyzeScopeMutablePackage", "analyzeScopeDynamicPackage", "analyzeScopeUnknownPackagesOf",
+            "analyzeScopePrimitivePackagesOf", "analyzeScopeLocations", "analyzeScopeImportOptions",
+            "analyzeScopeWholeClasspath", "analyzeScopeUnknownWholeClasspath", "analyzeScopeClasses",
+        ).forEach { fixture ->
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(testData("archrules/$fixture.java"))
+                PsiDocumentManager.getInstance(project).commitDocument(document)
+            }
+            listOf("com.allowed", "com.rules", "com.outside").forEach { packageName ->
+                myFixture.configureByText("Target.java", testData("archrules/analyzeScopeTarget.java").replace("com.scopeTarget", packageName))
+                assertTrue("$fixture in $packageName", warningDescriptions().isEmpty())
+            }
+            assertNull(fixture, project.service<ArchRuleProjectService>().discoveries().single().liveRule)
+        }
     }
 
     fun testAnnotationExclusivityHighlightsForbiddenAnnotationWithBecauseReason() {
@@ -1359,6 +1419,53 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         val warnings = warningHighlights()
         assertEquals(warnings.mapNotNull { it.description }.toString(), 2, warnings.size)
         assertEquals(listOf("out", "printStackTrace"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
+    fun testExactFieldAccessSkipsInlinedPrimitiveAndStringReads() {
+        addConstantFieldAccessFixture()
+        configureJavaFixture("ConstantReads.java", "codeaccess/constantFields/ConstantReads.java")
+
+        val constantNames = setOf("BOOLEAN", "BYTE", "SHORT", "CHAR", "INT", "LONG", "FLOAT", "DOUBLE", "TEXT", "EXPRESSION", "INSTANCE")
+        val references = PsiTreeUtil.findChildrenOfType(myFixture.file, PsiReferenceExpression::class.java)
+            .filter { it.referenceName in constantNames }
+        assertEquals(16, references.size)
+        assertTrue(references.all { it.resolve() is PsiField })
+        assertEquals(
+            List(16) { null },
+            references.map(ExactCodeAccessEvaluator::resolveFieldAccess),
+        )
+        assertTrue(warningHighlights().isEmpty())
+    }
+
+    fun testExactFieldAccessPreservesNonconstantReads() {
+        addConstantFieldAccessFixture()
+        configureJavaFixture("RealReads.java", "codeaccess/constantFields/RealReads.java")
+
+        val warnings = warningHighlights()
+        assertEquals(
+            listOf("RUNTIME", "RUNTIME_TEXT", "OBJECT", "MUTABLE", "INITIALIZED", "instanceInitialized", "RUNTIME", "MUTABLE"),
+            warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+    }
+
+    fun testExactFieldAccessPreservesSimpleCompoundAndIncrementWrites() {
+        addConstantFieldAccessFixture()
+        configureJavaFixture("FieldWrites.java", "codeaccess/constantFields/FieldWrites.java")
+
+        assertEquals(
+            listOf("MUTABLE", "MUTABLE", "MUTABLE"),
+            warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+    }
+
+    fun testExactFieldAccessPreservesBlankFinalInitializationWrites() {
+        val constants = addConstantFieldAccessFixture()
+        myFixture.configureFromExistingVirtualFile(constants.virtualFile)
+
+        assertEquals(
+            listOf("INITIALIZED", "instanceInitialized"),
+            warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
     }
 
     fun testExactCodeAccessErasesGenericReceiverTypeParameters() {
@@ -2913,6 +3020,16 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
                 }
             """.trimIndent(),
         )
+    }
+
+    private fun addConstantFieldAccessFixture(): PsiFile {
+        addCodeAccessJdkStubs()
+        val constants = myFixture.addFileToProject(
+            "src/main/java/com/example/constants/Constants.java",
+            testData("codeaccess/constantFields/Constants.java"),
+        )
+        addArchitectureRulesFixture("constantFieldAccess")
+        return constants
     }
 
     private fun addArchitectureRulesFixture(name: String) {

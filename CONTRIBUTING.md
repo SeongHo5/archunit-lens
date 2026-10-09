@@ -4,12 +4,12 @@ Thanks for helping improve ArchUnit Lens. The plugin is intentionally conservati
 
 ## Development environment
 
-- Use JDK 17 for local IntelliJ Platform test runs unless a task explicitly targets the CI matrix.
-- CI uses JDK 21 to match the repository workflow baseline.
+- Use JDK 21 for local builds and tests, matching the repository's CI baseline and configured Kotlin toolchain.
+- `JAVA_HOME` selects the JDK that launches Gradle. The Kotlin Gradle plugin uses the configured JDK 21 toolchain for compilation and tests; keeping both on JDK 21 matches CI and avoids relying on a separate local toolchain installation.
 - Use the Gradle wrapper from the repository root.
 
 ```powershell
-$env:JAVA_HOME='C:\Program Files\Java\jdk-17'
+$env:JAVA_HOME='C:\Program Files\Java\jdk-21'
 .\gradlew.bat test
 .\gradlew.bat ktlintCheck
 .\gradlew.bat check
