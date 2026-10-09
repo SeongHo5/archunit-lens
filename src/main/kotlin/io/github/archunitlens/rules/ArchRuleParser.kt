@@ -5,7 +5,7 @@ import com.intellij.psi.PsiExpression
 import com.intellij.psi.PsiImportStatement
 import com.intellij.psi.PsiJavaFile
 
-private val ARCHUNIT_SUBJECT_ENTRY_POINTS = setOf(
+internal val ARCHUNIT_SUBJECT_ENTRY_POINTS = setOf(
     "classes",
     "noClasses",
     "theClass",
@@ -86,6 +86,19 @@ object ArchRuleParser {
             calls: List<RawCall>,
             callsWithSource: List<Pair<RawCall, com.intellij.psi.PsiMethodCallExpression>>,
         ): DiscoveredArchRule {
+            if (calls.first().name in ARCHUNIT_SUBJECT_ENTRY_POINTS &&
+                !RawCallExtractor.isArchUnitEntryPoint(callsWithSource.first().second)
+            ) {
+                return DiscoveredArchRule(
+                    ruleName = source.ruleName,
+                    descriptor = unsupportedDescriptor(
+                        source,
+                        calls,
+                        calls.take(1).validateStaticArguments() ?: UnsupportedReason.UnsupportedEntryPoint(calls.first().name),
+                    ),
+                    liveRule = null,
+                )
+            }
             calls.helperBackedCustomCondition()?.let { helper ->
                 return DiscoveredArchRule(
                     ruleName = source.ruleName,

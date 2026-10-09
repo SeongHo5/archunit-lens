@@ -44,6 +44,8 @@ static final ArchRule mapperAnnotationMustBeExclusive =
 
 ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live warning으로 표시합니다. 지원하지 않거나 의미가 불확실한 DSL chain은 가능한 경우 Rule Overview metadata로만 보존하며 live warning을 만들지 않습니다. canonical 지원 범위는 [`docs/rule-support-matrix.md`](docs/rule-support-matrix.md)입니다.
 
+Live rule은 진입점 static method의 선언 소유자가 `com.tngtech.archunit.lang.syntax.ArchRuleDefinition`으로 유일하게 resolve될 때만 활성화됩니다. qualified call과 명시적·wildcard static import는 소유권이 확인되는 경우 지원합니다. 이름이 같은 프로젝트 helper, 미해결 또는 모호한 root는 metadata-only로 유지하며 helper body를 해석하지 않습니다.
+
 최초 live warning subset은 다음입니다.
 
 - `resideInAPackage(...)` / `resideInAnyPackage(...)`, explicit import, resolved Java reference 기반 package dependency ban
@@ -54,7 +56,7 @@ ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live wa
 - 모든 leaf가 정적으로 지원될 때 left-associative class predicate `and()` / `or()`와 독립적인 `andShould()` condition
 - `beAssignableTo(...)` 대상이 resolve되는 QueryMapper 형태 interface rule
 - direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule
-- exact `noClasses()` field, signature-aware method, constructor access. method/constructor signature는 primitive, array, erasure된 vararg type을 포함한 순서 있는 literal parameter class FQN으로 비교하며, 모든 sibling이 지원될 때만 left-associative `andShould()` / `orShould()`를 live 평가합니다.
+- exact `noClasses()` field, signature-aware method, constructor access. 컴파일 시 인라인되는 상수 필드 읽기는 제외하며, 비상수 읽기와 명시적인 쓰기는 계속 검출합니다. method/constructor signature는 primitive, array, erasure된 vararg type을 포함한 순서 있는 literal parameter class FQN으로 비교하며, 모든 sibling이 지원될 때만 left-associative `andShould()` / `orShould()`를 live 평가합니다.
 - positive method/constructor declaration convention과 annotation, 이름, convenience modifier, 지원되는 declaring-class fact를 사용하는 정적으로 판정 가능한 `noFields()`/`noMethods()` 규칙
 - literal/Java 상수 `packages`와 해석 가능한 `packagesOf` class literal의 `@AnalyzeClasses` package scope, 두 배열이 비어 있으면 annotation을 붙인 클래스의 package, `.because("...")` reason 표시
 

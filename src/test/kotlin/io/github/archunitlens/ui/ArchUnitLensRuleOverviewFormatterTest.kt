@@ -5,9 +5,15 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.DiscoveredArchRule
+import io.github.archunitlens.rules.addArchUnitEntryPointDeclarations
 import java.nio.file.Path
 
 class ArchUnitLensRuleOverviewFormatterTest : BasePlatformTestCase() {
+    override fun setUp() {
+        super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
+    }
+
     fun testFormatsSupportedAndUnsupportedDiscoveriesWithScanMetrics() {
         myFixture.addFileToProject(
             "src/test/java/java/lang/System.java",
