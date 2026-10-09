@@ -48,6 +48,8 @@ internal data class ResolvedConstructorCall(
 internal object ExactCodeAccessEvaluator {
     fun resolveFieldAccess(reference: PsiReferenceExpression): ResolvedFieldAccess? {
         val field = reference.resolve() as? PsiField ?: return null
+        // Constant-variable reads are inlined; assignments still represent field accesses.
+        if (!PsiUtil.isAccessedForWriting(reference) && field.computeConstantValue() != null) return null
         val ownerQualifiedName = reference.qualifierExpression.symbolicOwnerQualifiedName(
             declarationOwner = field.containingClass,
             isStatic = field.hasModifierProperty(PsiModifier.STATIC),

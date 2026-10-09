@@ -1,5 +1,11 @@
 # ArchUnit Lens Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Excluded inlined primitive/String constant field reads from exact access warnings while preserving nonconstant reads and explicit writes.
+
 ## [0.3.1] - 2026-09-29
 
 Patch release focused on accurate package-rule feedback, fresh rule discoveries, and safe rename previews.
