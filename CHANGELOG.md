@@ -5,6 +5,11 @@
 ### Fixed
 
 - Excluded rules disabled by ArchUnit `@ArchIgnore` on fields or declaring test classes from live warnings and Rule Overview, refreshing cached discovery after ignore edits and annotation resolution changes.
+- Excluded SOURCE-retained applied and intermediate annotations from live class/member meta-annotation facts and removal fixes, preserving CLASS/RUNTIME and default CLASS paths.
+- Included enclosing-instance parameters in exact source inner-constructor signatures across construction and delegation calls, and suppressed unprovable compiled inner signatures.
+- Preserved `@AnalyzeClasses` package scopes for Java constants, mixed arrays, resolved `packagesOf`, and default test-class packages. Unresolved/custom import scopes remain metadata-only instead of producing global or partial warnings; external constant edits refresh scope caches.
+- Required uniquely resolved ArchUnit entry-point ownership before enabling live rules, keeping same-name project helpers and unresolved or ambiguous roots metadata-only.
+- Excluded inlined primitive/String constant field reads from exact access warnings while preserving nonconstant reads and explicit writes.
 
 ## [0.3.1] - 2026-09-29
 

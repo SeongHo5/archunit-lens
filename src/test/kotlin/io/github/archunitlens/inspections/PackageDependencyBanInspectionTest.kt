@@ -18,6 +18,7 @@ import com.intellij.testFramework.LightProjectDescriptor
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.ArchUnitLensBundle
 import io.github.archunitlens.rules.ArchRuleProjectService
+import io.github.archunitlens.rules.addArchUnitEntryPointDeclarations
 import java.nio.file.Path
 
 class PackageDependencyBanInspectionTest : BasePlatformTestCase() {
@@ -25,6 +26,7 @@ class PackageDependencyBanInspectionTest : BasePlatformTestCase() {
 
     override fun setUp() {
         super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
         myFixture.enableInspections(ArchUnitLensInspection())
     }
 

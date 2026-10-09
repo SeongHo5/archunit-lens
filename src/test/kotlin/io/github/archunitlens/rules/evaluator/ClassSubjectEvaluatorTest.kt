@@ -14,8 +14,14 @@ import io.github.archunitlens.rules.InterfaceNamingRule
 import io.github.archunitlens.rules.MemberConventionRule
 import io.github.archunitlens.rules.MethodMetaAnnotationRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
+import io.github.archunitlens.rules.addArchUnitEntryPointDeclarations
 
 class ClassSubjectEvaluatorTest : BasePlatformTestCase() {
+    override fun setUp() {
+        super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
+    }
+
     fun testEvaluatesPackageAndDependencyPatterns() {
         val rule = parseRule<PackageDependencyBanRule>(
             """

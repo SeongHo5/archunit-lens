@@ -203,6 +203,7 @@ internal object ArchUnitLensRuleOverviewFormatter {
 
     private fun AnalyzeScope.label(): String = when (this) {
         AnalyzeScope.All -> ArchUnitLensBundle.message("overview.scope.all")
+        AnalyzeScope.Unknown -> ArchUnitLensBundle.message("overview.scope.unknown")
         is AnalyzeScope.Packages -> ArchUnitLensBundle.message("overview.scope.packages", packageNames.joinToString(separator = ","))
     }
 

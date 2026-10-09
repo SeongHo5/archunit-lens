@@ -182,7 +182,7 @@ class ArchRuleProjectService(private val project: Project) {
                 val cacheKey = file.virtualFile?.path ?: file.name
                 val sourceText = file.text
                 val cachedFile = cachedRuleFiles[cacheKey]
-                val resolutionDependent = file.requiresTypeResolution()
+                val resolutionDependent = file.requiresTypeResolution() || ArchRuleSourceFinder.scopeRequiresResolution(file)
                 val canReuseCachedFile = cachedFile?.sourceText == sourceText &&
                     (!resolutionDependent || cachedFile.resolutionStamp == resolutionStamp)
                 var currentRuleSourceCount = cachedFile?.ruleSourceCount ?: 0
@@ -380,6 +380,7 @@ private fun PsiJavaFile.requiresTypeResolution(): Boolean {
     }
     if (PsiTreeUtil.findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null) return true
     val methodCalls = PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
+    if (methodCalls.any { it.methodExpression.referenceName in ARCHUNIT_SUBJECT_ENTRY_POINTS }) return true
     if (
         methodCalls.any { call ->
             call.methodExpression.referenceName in setOf(

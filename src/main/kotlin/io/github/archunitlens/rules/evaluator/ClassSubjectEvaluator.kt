@@ -121,36 +121,12 @@ object ClassSubjectEvaluator {
     fun isForbiddenMetaAnnotation(
         annotation: PsiAnnotation,
         rule: ClassMetaAnnotationRule,
-    ): Boolean = annotation.isMetaAnnotatedWith(rule.forbiddenMetaAnnotationQualifiedName)
+    ): Boolean = MetaAnnotationFacts.matches(annotation, rule.forbiddenMetaAnnotationQualifiedName) == true
 
     private fun PsiClass.metaAnnotationState(qualifiedName: String): Boolean? {
         var unresolved = false
         modifierList?.annotations.orEmpty().forEach { annotation ->
-            when (annotation.metaAnnotationState(qualifiedName, mutableSetOf())) {
-                true -> return true
-                null -> unresolved = true
-                false -> Unit
-            }
-        }
-        return if (unresolved) null else false
-    }
-
-    private fun PsiAnnotation.metaAnnotationState(
-        qualifiedName: String,
-        visitedAnnotationTypes: MutableSet<String>,
-    ): Boolean? {
-        if (this.qualifiedName == qualifiedName) return true
-        val annotationClass = resolveAnnotationType()
-            ?: this.qualifiedName
-                ?.let { JavaPsiFacade.getInstance(project).findClass(it, resolveScope) }
-            ?: return null
-        val annotationQualifiedName = annotationClass.qualifiedName ?: return null
-        if (!visitedAnnotationTypes.add(annotationQualifiedName)) return false
-        if (annotationQualifiedName == qualifiedName) return true
-
-        var unresolved = false
-        annotationClass.modifierList?.annotations.orEmpty().forEach { metaAnnotation ->
-            when (metaAnnotation.metaAnnotationState(qualifiedName, visitedAnnotationTypes)) {
+            when (MetaAnnotationFacts.matches(annotation, qualifiedName)) {
                 true -> return true
                 null -> unresolved = true
                 false -> Unit
@@ -162,30 +138,7 @@ object ClassSubjectEvaluator {
     fun isForbiddenMetaAnnotation(
         annotation: PsiAnnotation,
         rule: MethodMetaAnnotationRule,
-    ): Boolean = annotation.isMetaAnnotatedWith(rule.forbiddenMetaAnnotationQualifiedName)
-
-    private fun PsiAnnotation.isMetaAnnotatedWith(qualifiedName: String): Boolean = isMetaAnnotatedWith(qualifiedName, mutableSetOf())
-
-    private fun PsiAnnotation.isMetaAnnotatedWith(
-        qualifiedName: String,
-        visitedAnnotationTypes: MutableSet<String>,
-    ): Boolean {
-        if (this.qualifiedName == qualifiedName) return true
-
-        val annotationClass = resolveAnnotationType()
-            ?: this.qualifiedName
-                ?.let { JavaPsiFacade.getInstance(project).findClass(it, resolveScope) }
-            ?: return false
-        val annotationQualifiedName = annotationClass.qualifiedName ?: return false
-        if (!visitedAnnotationTypes.add(annotationQualifiedName)) return false
-        if (annotationQualifiedName == qualifiedName) return true
-
-        return annotationClass.modifierList
-            ?.annotations
-            ?.any { metaAnnotation ->
-                metaAnnotation.isMetaAnnotatedWith(qualifiedName, visitedAnnotationTypes)
-            } == true
-    }
+    ): Boolean = MetaAnnotationFacts.matches(annotation, rule.forbiddenMetaAnnotationQualifiedName) == true
 
     private fun evaluatePredicate(
         aClass: PsiClass,
