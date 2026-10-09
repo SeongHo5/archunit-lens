@@ -1,5 +1,11 @@
 # ArchUnit Lens Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Excluded SOURCE-retained applied and intermediate annotations from live class/member meta-annotation facts and removal fixes, preserving CLASS/RUNTIME and default CLASS paths.
+
 ## [0.3.1] - 2026-09-29
 
 Patch release focused on accurate package-rule feedback, fresh rule discoveries, and safe rename previews.

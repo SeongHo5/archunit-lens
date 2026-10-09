@@ -53,7 +53,7 @@ ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live wa
 - positive/negative annotation, literal meta-annotation, single/any package(동일 클래스의 안전한 `private static final` literal `String[]` 포함), suffix/not-suffix, interface/non-interface, enum/non-enum, record/non-record, `JavaModifier.FINAL` 조건으로 구성한 static class convention
 - 모든 leaf가 정적으로 지원될 때 left-associative class predicate `and()` / `or()`와 독립적인 `andShould()` condition
 - `beAssignableTo(...)` 대상이 resolve되는 QueryMapper 형태 interface rule
-- direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule
+- 클래스 파일에 남는 direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule(CLASS/RUNTIME 또는 기본 CLASS retention, SOURCE 경로 제외)
 - exact `noClasses()` field, signature-aware method, constructor access. method/constructor signature는 primitive, array, erasure된 vararg type을 포함한 순서 있는 literal parameter class FQN으로 비교하며, 모든 sibling이 지원될 때만 left-associative `andShould()` / `orShould()`를 live 평가합니다.
 - positive method/constructor declaration convention과 annotation, 이름, convenience modifier, 지원되는 declaring-class fact를 사용하는 정적으로 판정 가능한 `noFields()`/`noMethods()` 규칙
 - `@AnalyzeClasses(packages = ...)` scope와 `.because("...")` reason 표시

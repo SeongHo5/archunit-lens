@@ -4,9 +4,11 @@ import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.codeInspection.InspectionManager
 import com.intellij.codeInspection.ProblemsHolder
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.psi.JavaElementVisitor
+import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.JavaResolveResult
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiJavaCodeReferenceElement
@@ -863,6 +865,100 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
             fixes.map { it.text }.toString(),
             fixes.any { it.text.contains(removeAnnotationFixText("Proxy")) },
         )
+    }
+
+    fun testForbiddenMetaAnnotationRetentionExcludesSourceWarningsAndRemovalFixes() {
+        addRetentionAnnotationStubs()
+        addArchitectureRulesFixture("forbiddenMetaAnnotationRetention")
+        val discoveries = project.service<ArchRuleProjectService>().discoveries()
+        assertEquals(discoveries.toString(), 2, discoveries.count { it.liveRule != null })
+        val cases = listOf(
+            "SourceViaRuntime" to false,
+            "RuntimeViaSource" to false,
+            "DefaultViaSource" to false,
+            "SourceCycleA" to false,
+            "UnresolvedRetention" to false,
+            "ClassViaRuntime" to true,
+            "RuntimeViaClass" to true,
+            "DefaultViaDefault" to true,
+            "CycleA" to true,
+        )
+        cases.forEach { (annotation, retained) ->
+            myFixture.configureByText(
+                "Gateway.java",
+                testData("javaSources/annotationRetention/MetaAnnotatedGateway.java").replace("__ANNOTATION__", annotation),
+            )
+            assertEquals(annotation, if (retained) 2 else 0, warningHighlights().size)
+            assertEquals(
+                annotation,
+                retained,
+                myFixture.getAllQuickFixes().any { it.text.contains(removeAnnotationFixText(annotation)) },
+            )
+        }
+    }
+
+    fun testMetaAnnotationRetentionPreservesSourceAnnotationWhenRemovingRetainedViolation() {
+        addRetentionAnnotationStubs()
+        addArchitectureRulesFixture("forbiddenMetaAnnotationRetention")
+        val discoveries = project.service<ArchRuleProjectService>().discoveries()
+        assertEquals(discoveries.toString(), 2, discoveries.count { it.liveRule != null })
+        myFixture.configureByText(
+            "Gateway.java",
+            testData("javaSources/annotationRetention/RemoveRetainedMetaAnnotation.java"),
+        )
+        assertEquals(1, warningHighlights().size)
+        myFixture.launchAction(myFixture.getAllQuickFixes().single { it.text.contains(removeAnnotationFixText("ClassViaRuntime")) })
+        assertTrue(myFixture.file.text.contains("@com.example.SourceViaRuntime"))
+        assertFalse(myFixture.file.text.contains("@com.example.ClassViaRuntime"))
+        assertTrue(warningHighlights().isEmpty())
+    }
+
+    fun testMetaAnnotationRetentionInClassMemberSelectionsAndNegativeConditions() {
+        addRetentionAnnotationStubs()
+        addArchitectureRulesFixture("metaAnnotationRetention")
+        val discoveries = project.service<ArchRuleProjectService>().discoveries()
+        assertEquals(discoveries.toString(), 4, discoveries.count { it.liveRule != null })
+        val cases = listOf(
+            "SourceViaRuntime" to false,
+            "RuntimeViaSource" to false,
+            "DefaultViaSource" to false,
+            "UnresolvedRetention" to false,
+            "ClassViaRuntime" to true,
+            "RuntimeViaClass" to true,
+            "DefaultViaDefault" to true,
+        )
+        cases.forEach { (annotation, retained) ->
+            myFixture.configureByText(
+                "Target.java",
+                testData("javaSources/annotationRetention/MetaAnnotatedTarget.java").replace("__ANNOTATION__", annotation),
+            )
+            assertEquals(annotation, if (retained) 4 else 0, warningHighlights().size)
+        }
+    }
+
+    fun testMetaAnnotationRetentionEditsRefreshLiveFacts() {
+        addRetentionAnnotationStubs()
+        addArchitectureRulesFixture("forbiddenMetaAnnotationRetention")
+        val discoveries = project.service<ArchRuleProjectService>().discoveries()
+        assertEquals(discoveries.toString(), 2, discoveries.count { it.liveRule != null })
+        myFixture.configureByText(
+            "Gateway.java",
+            testData("javaSources/annotationRetention/MetaAnnotatedGateway.java").replace("__ANNOTATION__", "SourceViaRuntime"),
+        )
+        assertTrue(warningHighlights().isEmpty())
+        val annotationClass = JavaPsiFacade.getInstance(project).findClass("com.example.SourceViaRuntime", myFixture.file.resolveScope)!!
+        val value = annotationClass.modifierList!!.findAnnotation("java.lang.annotation.Retention")!!.findDeclaredAttributeValue("value")!!
+        WriteCommandAction.runWriteCommandAction(project) {
+            value.replace(JavaPsiFacade.getElementFactory(project).createExpressionFromText("RetentionPolicy.RUNTIME", value))
+        }
+        assertEquals(2, warningHighlights().size)
+        assertTrue(myFixture.getAllQuickFixes().any { it.text.contains(removeAnnotationFixText("SourceViaRuntime")) })
+    }
+
+    private fun addRetentionAnnotationStubs() {
+        myFixture.addFileToProject("src/test/java/java/lang/annotation/Retention.java", testData("javaSources/annotationRetention/Retention.java"))
+        myFixture.addFileToProject("src/test/java/java/lang/annotation/RetentionPolicy.java", testData("javaSources/annotationRetention/RetentionPolicy.java"))
+        myFixture.addFileToProject("src/test/java/com/example/Annotations.java", testData("javaSources/annotationRetention/Annotations.java"))
     }
 
     fun testCustomMetaAnnotationHelperRemainsUnsupportedWithoutWarning() {

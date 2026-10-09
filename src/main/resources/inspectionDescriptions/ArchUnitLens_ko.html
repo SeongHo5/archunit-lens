@@ -14,6 +14,10 @@ exact <code>noClasses()</code> field access, signature-aware method call, constr
 <code>and()</code>/<code>or()</code>, condition <code>andShould()</code>, code-access의 left-associative <code>andShould()</code>/<code>orShould()</code>를 live warning으로 평가합니다.
 </p>
 <p>
+meta-annotation fact는 각 annotation 단계에서 CLASS/RUNTIME retention(기본 CLASS)을 따릅니다.
+SOURCE retention 경로는 meta-annotation 일치나 annotation 제거 fix를 만들지 않으며, retention 값이 미해결이면 warning을 만들지 않습니다.
+</p>
+<p>
 지원하지 않거나 custom/helper 기반이거나 의미가 불확실한 rule은 가능한 경우 Rule Overview metadata로
 보존하지만 warning은 만들지 않습니다. 지원하지 않는 field/method/constructor declaration, literal schema가 아닌 method/constructor access,
 access predicate, method reference, unsupported sibling은 metadata-only로 유지합니다. 지원/미지원 rule, scope, reason, unsupported reason,

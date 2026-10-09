@@ -16,6 +16,10 @@ accesses are also supported. Class predicate <code>and()</code>/<code>or()</code
 code-access <code>andShould()</code>/<code>orShould()</code> are live only when every leaf is exact, statically supported, and resolved.
 </p>
 <p>
+Meta-annotation facts follow CLASS/RUNTIME retention (default CLASS) at every annotation edge.
+SOURCE-retained paths cannot produce a meta-annotation match or an annotation removal fix; unresolved retention values produce no warning.
+</p>
+<p>
 Unsupported, custom, or ambiguous helper-based rules are retained as Rule Overview metadata when possible
 but do not produce warnings. Unsupported field/method/constructor declarations, non-literal method/constructor access schemas,
 access predicates, method references, and unsupported siblings remain metadata-only. Open the ArchUnit Lens tool window to review supported and unsupported

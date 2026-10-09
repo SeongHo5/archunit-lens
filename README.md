@@ -53,7 +53,7 @@ The initial live-warning subset includes:
 - static class conventions for positive/negative annotations and literal meta-annotations, single/any package patterns (including safe private static-final literal package arrays), suffix/not-suffix, interface/non-interface, enum/non-enum, record/non-record, and `JavaModifier.FINAL` checks
 - left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
-- literal class and method meta-annotation rules, including direct and transitively composed annotations
+- literal class and method meta-annotation rules, including direct and transitively composed annotations retained in class files (CLASS/RUNTIME or default CLASS; SOURCE edges are excluded)
 - exact `noClasses()` field, signature-aware method, and constructor accesses. Method and constructor signatures use ordered literal parameter class FQNs, including primitive, array, and erased vararg types; bounded left-associative `andShould()` / `orShould()` is live only when every sibling is supported
 - positive method/constructor declaration conventions plus statically decidable `noFields()`/`noMethods()` rules for annotations, names, convenience modifiers, and supported declaring-class facts
 - `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
