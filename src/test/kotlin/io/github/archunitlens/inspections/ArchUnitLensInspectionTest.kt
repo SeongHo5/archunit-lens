@@ -8,6 +8,8 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.JavaResolveResult
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiCompiledElement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
@@ -1743,44 +1745,90 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         assertEquals(listOf("super", "ImplicitParent"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
     }
 
+    fun testInnerConstructorRulesUseJvmEnclosingInstanceParameters() {
+        addSignatureCodeAccessStubs()
+        val constructorTargets = myFixture.addFileToProject(
+            "src/test/java/org/example/Outer.java",
+            testData("codeAccess/innerConstructors/Outer.java"),
+        )
+        addArchitectureRulesFixture("innerConstructorSignatures")
+        myFixture.configureFromExistingVirtualFile(constructorTargets.virtualFile)
+
+        val liveRules = project.service<ArchRuleProjectService>().rulesForPackage("org.example")
+            .filterIsInstance<NoClassesCodeAccessRule>()
+        assertEquals(setOf("source_signatures", "jvm_signatures"), liveRules.map { it.ruleName }.toSet())
+        val warnings = warningHighlights()
+        assertEquals(warnings.mapNotNull { it.description }.toString(), 16, warnings.size)
+        assertTrue(warnings.all { it.description.orEmpty().contains("jvm_signatures") })
+        assertEquals(3, warnings.count { myFixture.file.text.substring(it.startOffset, it.endOffset) == "this" })
+        assertEquals(2, warnings.count { myFixture.file.text.substring(it.startOffset, it.endOffset) == "super" })
+        val innerCalls = warnings.filter { it.description.orEmpty().contains("Outer.ExplicitInner") }
+        assertEquals(8, innerCalls.size)
+        assertEquals(3, innerCalls.count { it.description.orEmpty().endsWith("(org.example.Outer)") })
+        assertEquals(5, innerCalls.count { it.description.orEmpty().endsWith("(org.example.Outer, java.lang.String)") })
+        assertFalse(innerCalls.any { it.description.orEmpty().contains("org.example.OuterChild") })
+    }
+
+    fun testInnerConstructorRulesFailClosedWithoutValidEnclosingInstances() {
+        addSignatureCodeAccessStubs()
+        myFixture.addFileToProject(
+            "src/test/java/org/example/Outer.java",
+            testData("codeAccess/innerConstructors/Outer.java"),
+        )
+        addArchitectureRulesFixture("invalidInnerConstructorEnclosingInstances")
+        myFixture.configureByText("InvalidCalls.java", testData("codeAccess/innerConstructors/InvalidCalls.java"))
+
+        assertEmpty(warningDescriptions())
+    }
+
+    fun testInnerConstructorRulesFailClosedForCompiledSignatures() {
+        addSignatureCodeAccessStubs()
+        val targets = myFixture.addFileToProject(
+            "src/test/java/org/example/Outer.java",
+            testData("codeAccess/innerConstructors/Outer.java"),
+        )
+        myFixture.configureFromExistingVirtualFile(targets.virtualFile)
+        val expression = PsiTreeUtil.findChildrenOfType(myFixture.file, PsiNewExpression::class.java)
+            .first { it.classReference?.referenceName == "ExplicitInner" }
+        val constructor = expression.resolveConstructor() ?: error("Expected explicit source constructor")
+        val sourceClass = constructor.containingClass ?: error("Expected constructor owner")
+        val compiledClass = object : PsiClass by sourceClass, PsiCompiledElement {
+            override fun getMirror(): PsiElement = sourceClass
+        }
+        val compiledConstructor = object : PsiMethod by constructor {
+            override fun getContainingClass(): PsiClass = compiledClass
+        }
+        val compiledConstruction = object : PsiNewExpression by expression {
+            override fun resolveConstructor(): PsiMethod = compiledConstructor
+        }
+        assertNull(ExactCodeAccessEvaluator.resolveNewExpression(compiledConstruction))
+
+        val delegation = PsiTreeUtil.findChildrenOfType(myFixture.file, PsiMethodCallExpression::class.java)
+            .first { it.methodExpression.referenceName == "this" }
+        val sourceDelegation = delegation.resolveMethod() ?: error("Expected explicit delegation constructor")
+        val compiledDelegation = object : PsiMethod by sourceDelegation {
+            override fun getContainingClass(): PsiClass = compiledClass
+        }
+        val compiledCall = object : PsiMethodCallExpression by delegation {
+            override fun resolveMethod(): PsiMethod = compiledDelegation
+        }
+        assertNull(ExactCodeAccessEvaluator.resolveExplicitConstructorCall(compiledCall))
+    }
+
     fun testImplicitDefaultSuperFallbackRequiresInnerSuperclassEnclosingInstance() {
         addSignatureCodeAccessStubs()
         val constructorTargets = myFixture.addFileToProject(
             "src/test/java/org/example/Outer.java",
-            """
-                package org.example;
-                public class Outer {
-                    public class InnerParent {}
-                    public class NestedChild extends InnerParent {
-                        public NestedChild() { super(); }
-                    }
-                }
-                class OuterChild extends Outer {}
-                class ExternalChild extends Outer.InnerParent {
-                    ExternalChild() { super(); }
-                    ExternalChild(Outer outer) { outer.super(); }
-                    ExternalChild(OuterChild outer) { outer.super(); }
-                    ExternalChild(java.lang.String wrong) { wrong.super(); }
-                }
-            """.trimIndent(),
+            testData("codeAccess/innerConstructors/ImplicitSuperOuter.java"),
         )
-        addArchitectureRules(
-            """
-                package com.example;
-                import com.tngtech.archunit.junit.ArchTest;
-                import com.tngtech.archunit.lang.ArchRule;
-                import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
-                class ArchitectureRules {
-                    @ArchTest static final ArchRule inner_default_constructor = noClasses().should()
-                            .callConstructor(org.example.Outer.InnerParent.class);
-                }
-            """.trimIndent(),
-        )
+        addArchitectureRulesFixture("implicitInnerSuperclassConstructor")
         myFixture.configureFromExistingVirtualFile(constructorTargets.virtualFile)
 
         val warnings = warningHighlights()
         assertEquals(warnings.mapNotNull { it.description }.toString(), 3, warnings.size)
         assertEquals(listOf("super", "super", "super"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+        assertTrue(warnings.all { it.description.orEmpty().contains("inner_default_constructor") })
+        assertTrue(warnings.all { it.description.orEmpty().contains("org.example.Outer") })
     }
 
     fun testImplicitDefaultConstructorFallbackFailsClosedForInvalidCalls() {

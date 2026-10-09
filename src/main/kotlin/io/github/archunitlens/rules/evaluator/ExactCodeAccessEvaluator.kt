@@ -1,6 +1,7 @@
 package io.github.archunitlens.rules.evaluator
 
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiCompiledElement
 import com.intellij.psi.PsiEllipsisType
 import com.intellij.psi.PsiErrorElement
 import com.intellij.psi.PsiField
@@ -40,7 +41,9 @@ internal data class ResolvedConstructorCall(
  *
  * A resolved member normally proves name and signature identity. An implicit
  * default constructor instead requires an accessible resolved class with no
- * declared constructors. The symbolic owner remains the qualifier's
+ * declared constructors. Source non-static member constructors include their
+ * JVM enclosing-instance parameter; unprovable inner signatures fail closed.
+ * The symbolic owner remains the qualifier's
  * JVM-erased static type, matching ArchUnit's access target owner; inherited,
  * overridden, and differently bounded generic accesses therefore differ from
  * the exact owner named by the rule.
@@ -77,7 +80,10 @@ internal object ExactCodeAccessEvaluator {
         val constructor = expression.resolveConstructor()
         if (constructor != null) {
             val ownerQualifiedName = expression.type?.erasureText() ?: return null
-            return ResolvedConstructorCall(ownerQualifiedName, constructor.rawParameterTypeQualifiedNames())
+            val targetClass = constructor.containingClass ?: return null
+            if (PsiUtil.isInnerClass(targetClass) && !targetClass.canInstantiateAt(expression)) return null
+            val parameterTypes = targetClass.constructorParameterTypeQualifiedNames(constructor) ?: return null
+            return ResolvedConstructorCall(ownerQualifiedName, parameterTypes)
         }
         return expression.resolveImplicitDefaultConstructor()
     }
@@ -92,7 +98,10 @@ internal object ExactCodeAccessEvaluator {
         } else {
             constructor.containingClass?.qualifiedName
         } ?: return null
-        return ResolvedConstructorCall(ownerQualifiedName, constructor.rawParameterTypeQualifiedNames())
+        val targetClass = constructor.containingClass ?: return null
+        if (referenceName == "super" && !targetClass.hasValidSuperEnclosingInstance(call)) return null
+        val parameterTypes = targetClass.constructorParameterTypeQualifiedNames(constructor) ?: return null
+        return ResolvedConstructorCall(ownerQualifiedName, parameterTypes)
     }
 
     fun matches(condition: ConditionExpr.AccessField, access: ResolvedFieldAccess): Boolean = condition.ownerQualifiedName == access.ownerQualifiedName &&
@@ -150,7 +159,8 @@ internal object ExactCodeAccessEvaluator {
         if (!classResult.isValidResult || !classResult.isAccessible) return null
         val targetClass = classResult.element as? PsiClass ?: return null
         if (!targetClass.hasImplicitDefaultConstructor() || !targetClass.canInstantiateAt(this)) return null
-        return ResolvedConstructorCall(targetClass.qualifiedName ?: return null, emptyList())
+        val parameterTypes = targetClass.constructorParameterTypeQualifiedNames() ?: return null
+        return ResolvedConstructorCall(targetClass.qualifiedName ?: return null, parameterTypes)
     }
 
     private fun PsiMethodCallExpression.resolveImplicitDefaultSuperConstructor(
@@ -166,7 +176,8 @@ internal object ExactCodeAccessEvaluator {
         val sourceClass = enclosingConstructor.containingClass?.takeUnless { it.isEnum || it.isRecord } ?: return null
         val targetClass = sourceClass.accessibleDirectSuperClass() ?: return null
         if (!targetClass.hasImplicitDefaultConstructor() || !targetClass.hasValidSuperEnclosingInstance(this)) return null
-        return ResolvedConstructorCall(targetClass.qualifiedName ?: return null, emptyList())
+        val parameterTypes = targetClass.constructorParameterTypeQualifiedNames() ?: return null
+        return ResolvedConstructorCall(targetClass.qualifiedName ?: return null, parameterTypes)
     }
 
     private fun com.intellij.psi.PsiCall.hasEmptyCompleteArgumentList(): Boolean {
@@ -185,17 +196,32 @@ internal object ExactCodeAccessEvaluator {
         if (hasModifierProperty(PsiModifier.ABSTRACT)) return false
         if (!PsiUtil.isInnerClass(this)) return true
         val enclosingClass = containingClass ?: return false
-        return expression.qualifier != null ||
-            InheritanceUtil.hasEnclosingInstanceInScope(enclosingClass, expression, false, false)
+        val qualifier = expression.qualifier
+            ?: return InheritanceUtil.hasEnclosingInstanceInScope(enclosingClass, expression, false, false)
+        return qualifier.type.isEnclosingInstanceOf(enclosingClass)
     }
 
     private fun PsiClass.hasValidSuperEnclosingInstance(call: PsiMethodCallExpression): Boolean {
         if (!PsiUtil.isInnerClass(this)) return true
         val enclosingClass = containingClass ?: return false
-        val qualifierType = call.methodExpression.qualifierExpression?.type
+        val qualifier = call.methodExpression.qualifierExpression
             ?: return InheritanceUtil.hasEnclosingInstanceInScope(enclosingClass, call, false, false)
-        val qualifierClass = PsiUtil.resolveClassInType(TypeConversionUtil.erasure(qualifierType)) ?: return false
+        return qualifier.type.isEnclosingInstanceOf(enclosingClass)
+    }
+
+    private fun PsiType?.isEnclosingInstanceOf(enclosingClass: PsiClass): Boolean {
+        val qualifierClass = this?.let { PsiUtil.resolveClassInType(TypeConversionUtil.erasure(it)) } ?: return false
         return InheritanceUtil.isInheritorOrSelf(qualifierClass, enclosingClass, true)
+    }
+
+    private fun PsiClass.constructorParameterTypeQualifiedNames(constructor: PsiMethod? = null): List<String>? {
+        if (qualifiedName == null) return null
+        val sourceParameters = constructor?.rawParameterTypeQualifiedNames().orEmpty()
+        if (!PsiUtil.isInnerClass(this)) return sourceParameters
+        // Compiled PSI may hide or expose synthetic parameters; source alone cannot prove that shape.
+        if (this is PsiCompiledElement || containingFile !is PsiJavaFile) return null
+        val enclosingType = containingClass?.qualifiedName ?: return null
+        return listOf(enclosingType) + sourceParameters
     }
 
     private fun PsiClass.accessibleDirectSuperClass(): PsiClass? {

@@ -54,7 +54,7 @@ The initial live-warning subset includes:
 - left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
 - literal class and method meta-annotation rules, including direct and transitively composed annotations
-- exact `noClasses()` field, signature-aware method, and constructor accesses. Method and constructor signatures use ordered literal parameter class FQNs, including primitive, array, and erased vararg types; bounded left-associative `andShould()` / `orShould()` is live only when every sibling is supported
+- exact `noClasses()` field, signature-aware method, and constructor accesses. Method and constructor signatures use ordered literal parameter class FQNs, including primitive, array, and erased vararg types. Source non-static member constructors include the enclosing-instance type as the first parameter. Compiled inner signatures that cannot be proven produce no warning. Bounded left-associative `andShould()` / `orShould()` is live only when every sibling is supported
 - positive method/constructor declaration conventions plus statically decidable `noFields()`/`noMethods()` rules for annotations, names, convenience modifiers, and supported declaring-class facts
 - `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
 
