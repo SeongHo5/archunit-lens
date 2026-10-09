@@ -59,6 +59,7 @@ Live rule은 진입점 static method의 선언 소유자가 `com.tngtech.archuni
 - exact `noClasses()` field, signature-aware method, constructor access. 컴파일 시 인라인되는 상수 필드 읽기는 제외하며, 비상수 읽기와 명시적인 쓰기는 계속 검출합니다. method/constructor signature는 primitive, array, erasure된 vararg type을 포함한 순서 있는 literal parameter class FQN으로 비교합니다. 소스의 non-static member constructor는 enclosing-instance type을 첫 parameter로 포함하며, 증명할 수 없는 compiled inner signature는 경고하지 않습니다. 모든 sibling이 지원될 때만 left-associative `andShould()` / `orShould()`를 live 평가합니다.
 - positive method/constructor declaration convention과 annotation, 이름, convenience modifier, 지원되는 declaring-class fact를 사용하는 정적으로 판정 가능한 `noFields()`/`noMethods()` 규칙
 - literal/Java 상수 `packages`와 해석 가능한 `packagesOf` class literal의 `@AnalyzeClasses` package scope, 두 배열이 비어 있으면 annotation을 붙인 클래스의 package, `.because("...")` reason 표시
+- rule field 또는 해당 field를 선언한 test class의 실제 ArchUnit `@ArchIgnore`는 해당 rule을 live warning과 Rule Overview에서 제외합니다. 이름만 같은 다른 annotation은 rule을 비활성화하지 않으며, annotation을 제거하면 PSI 갱신 후 다시 발견합니다.
 
 범위 값 하나라도 해석할 수 없으면 rule 전체를 metadata로만 보존하며, 혼합 배열에서 알 수 없는 원소를 버리지 않습니다. 비어 있지 않은 `locations`, `importOptions`, `classes` 또는 `wholeClasspath = true`도 정확한 import 대상을 정적 package scope만으로 보장할 수 없어 metadata로만 보존합니다. Location provider나 import option은 실행하지 않습니다. `@AnalyzeClasses`가 없으면 기존 전체 package scope를 유지합니다.
 

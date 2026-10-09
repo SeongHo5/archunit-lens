@@ -51,6 +51,61 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         myFixture.enableInspections(ArchUnitLensInspection())
     }
 
+    fun testArchIgnoreSuppressesFieldAndClassWarningsButKeepsActiveSiblings() {
+        addArchIgnoreAnnotation()
+        addArchitectureRules(testData("archIgnore/Rules.java"))
+        val target = testData("archIgnore/Target.java")
+        listOf("ignoredfield", "ignoredclass").forEach { packageName ->
+            myFixture.configureByText("Target.java", target.replace("com.example.active", "com.example.$packageName"))
+            assertTrue(warningDescriptions().isEmpty())
+        }
+        myFixture.configureByText("Target.java", target)
+        assertEquals(1, warningDescriptions().size)
+        assertTrue(warningDescriptions().single().startsWith(problemMessage("active_sibling")))
+    }
+
+    fun testArchIgnoreRemovalRestoresWarningsAfterWarmCache() {
+        addArchIgnoreAnnotation()
+        val initialSource = testData("archIgnore/MutableRules.java")
+        val ruleFile = myFixture.addFileToProject("src/test/java/com/example/MutableRules.java", initialSource)
+        val documentManager = PsiDocumentManager.getInstance(project)
+        val document = documentManager.getDocument(ruleFile) ?: error("Expected rule document")
+        myFixture.configureByText("Target.java", testData("archIgnore/Target.java"))
+        assertEquals(2, warningDescriptions().size)
+
+        listOf("// FIELD_IGNORE", "// CLASS_IGNORE").forEach { marker ->
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(initialSource.replace(marker, "@ArchIgnore"))
+                documentManager.commitDocument(document)
+            }
+            val expectedCount = if (marker == "// FIELD_IGNORE") 1 else 0
+            assertEquals(expectedCount, warningDescriptions().size)
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(initialSource)
+                documentManager.commitDocument(document)
+            }
+            assertEquals(2, warningDescriptions().size)
+        }
+    }
+
+    fun testUnrelatedArchIgnoreAnnotationsPreserveWarnings() {
+        addArchIgnoreAnnotation()
+        myFixture.addFileToProject("src/test/java/com/example/fake/ArchIgnore.java", testData("archIgnore/UnrelatedArchIgnore.java"))
+        addArchitectureRules(testData("archIgnore/UnrelatedRules.java"))
+        myFixture.configureByText("Target.java", testData("archIgnore/Target.java"))
+        val warnings = warningDescriptions()
+        assertEquals(2, warnings.size)
+        assertTrue(warnings.any { it.startsWith(problemMessage("active_unrelated")) })
+        assertTrue(warnings.any { it.startsWith(problemMessage("active_shadowed")) })
+    }
+
+    private fun addArchIgnoreAnnotation() {
+        myFixture.addFileToProject(
+            "src/test/java/com/tngtech/archunit/junit/ArchIgnore.java",
+            testData("archIgnore/ArchIgnore.java"),
+        )
+    }
+
     fun testPackageDependencyBanHighlightsForbiddenImport() {
         addArchitectureRulesFixture("packageDependencyBan")
         addDependencyReferenceStubs()

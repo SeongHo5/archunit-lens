@@ -58,6 +58,28 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         )
     }
 
+    fun testArchIgnoreOmitsFieldAndDeclaringClassRulesButKeepsActiveSiblings() {
+        addArchIgnoreAnnotation()
+        val sources = ArchRuleSourceFinder.findInFile(configureJava(testData("archIgnore/Rules.java")))
+        assertEquals(listOf("active_sibling", "active_nested"), sources.map { it.ruleName })
+        assertTrue(sources.all { ArchRuleParser.discover(it)?.liveRule != null })
+    }
+
+    fun testArchIgnoreDoesNotDisableRulesForUnrelatedOrShadowedAnnotations() {
+        addArchIgnoreAnnotation()
+        myFixture.addFileToProject("src/test/java/com/example/fake/ArchIgnore.java", testData("archIgnore/UnrelatedArchIgnore.java"))
+        val sources = ArchRuleSourceFinder.findInFile(configureJava(testData("archIgnore/UnrelatedRules.java")))
+        assertEquals(listOf("active_unrelated", "active_shadowed"), sources.map { it.ruleName })
+        assertTrue(sources.all { ArchRuleParser.discover(it)?.liveRule != null })
+    }
+
+    private fun addArchIgnoreAnnotation() {
+        myFixture.addFileToProject(
+            "src/test/java/com/tngtech/archunit/junit/ArchIgnore.java",
+            testData("archIgnore/ArchIgnore.java"),
+        )
+    }
+
     fun testParsesPackageDependencyBanRule() {
         val rule = parseSingleRule(
             """
