@@ -181,7 +181,7 @@ class ArchRuleProjectService(private val project: Project) {
                 val cacheKey = file.virtualFile?.path ?: file.name
                 val sourceText = file.text
                 val cachedFile = cachedRuleFiles[cacheKey]
-                val resolutionDependent = file.requiresTypeResolution()
+                val resolutionDependent = file.requiresTypeResolution() || ArchRuleSourceFinder.scopeRequiresResolution(file)
                 val canReuseCachedFile = cachedFile?.sourceText == sourceText &&
                     (!resolutionDependent || cachedFile.resolutionStamp == resolutionStamp)
                 var currentRuleSourceCount = cachedFile?.ruleSourceCount ?: 0

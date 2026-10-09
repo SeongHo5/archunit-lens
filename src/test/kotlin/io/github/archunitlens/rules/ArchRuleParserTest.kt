@@ -191,6 +191,75 @@ class ArchRuleParserTest : BasePlatformTestCase() {
         assertEquals("Primary and secondary mapper annotations must be exclusive.", rule.reason)
     }
 
+    fun testAnalyzeClassesLiteralConstantAndMixedConstantScopes() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        val cases = mapOf(
+            "analyzeScopeLiteral" to listOf("com.allowed"),
+            "analyzeScopeConstant" to listOf("com.allowed"),
+            "analyzeScopeMixedConstants" to listOf("com.literal", "com.allowed", "com.concatenated"),
+        )
+        cases.forEach { (fixture, packages) ->
+            val discovery = discoverSingleRule(testData("archrules/$fixture.java"))
+            assertNotNull(fixture, discovery.liveRule)
+            assertEquals(fixture, AnalyzeScope.Packages(packages), discovery.descriptor.scope)
+            packages.forEach {
+                assertTrue(discovery.descriptor.scope.includes(it))
+                assertTrue(discovery.descriptor.scope.includes("$it.child"))
+                assertFalse(discovery.descriptor.scope.includes("${it}Other"))
+            }
+        }
+    }
+
+    fun testAnalyzeClassesBareAndEmptyAttributesUseAnnotatedClassPackage() {
+        listOf("analyzeScopeBare", "analyzeScopeEmpty").forEach { fixture ->
+            val discovery = discoverSingleRule(testData("archrules/$fixture.java"))
+            assertNotNull(fixture, discovery.liveRule)
+            assertEquals(AnalyzeScope.Packages(listOf("com.rules")), discovery.descriptor.scope)
+            assertTrue(discovery.descriptor.scope.includes("com.rules.child"))
+            assertFalse(discovery.descriptor.scope.includes("com.rulesOther"))
+            assertFalse(discovery.descriptor.scope.includes("com.outside"))
+        }
+    }
+
+    fun testAnalyzeClassesPackagesOfAndPackagesAreCombinedWithoutPartialValues() {
+        myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        val packagesOf = discoverSingleRule(testData("archrules/analyzeScopePackagesOf.java"))
+        assertNotNull(packagesOf.liveRule)
+        assertEquals(AnalyzeScope.Packages(listOf("com.allowed.domain")), packagesOf.descriptor.scope)
+        val combined = discoverSingleRule(testData("archrules/analyzeScopeCombinedPackages.java"))
+        assertNotNull(combined.liveRule)
+        assertEquals(AnalyzeScope.Packages(listOf("com.literal", "com.allowed.domain", "com.rules")), combined.descriptor.scope)
+        assertFalse(combined.descriptor.scope.includes("com.allowed"))
+    }
+
+    fun testAnalyzeClassesUnknownOrCustomImportScopesRetainOnlyMetadata() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        listOf(
+            "analyzeScopeUnknownPackages", "analyzeScopeMissingPackage", "analyzeScopeMutablePackage", "analyzeScopeDynamicPackage", "analyzeScopeUnknownPackagesOf",
+            "analyzeScopePrimitivePackagesOf", "analyzeScopeLocations", "analyzeScopeImportOptions",
+            "analyzeScopeWholeClasspath", "analyzeScopeUnknownWholeClasspath", "analyzeScopeClasses",
+        ).forEach { fixture ->
+            val discovery = discoverSingleRule(testData("archrules/$fixture.java"))
+            assertNull(fixture, discovery.liveRule)
+            assertEquals(fixture, AnalyzeScope.Unknown, discovery.descriptor.scope)
+            assertTrue(discovery.descriptor.supportStatus is SupportStatus.Unsupported)
+            assertEquals("Import scope must be preserved.", discovery.descriptor.reason)
+            assertFalse(discovery.descriptor.scope.includes("com.allowed"))
+            assertFalse(discovery.descriptor.scope.includes("com.outside"))
+        }
+    }
+
+    fun testAnalyzeClassesUnnamedPackageAndEmptyPackageImportRoot() {
+        listOf("analyzeScopeDefaultPackage", "analyzeScopeEmptyPackage").forEach { fixture ->
+            val discovery = discoverSingleRule(testData("archrules/$fixture.java"))
+            assertNotNull(discovery.liveRule)
+            assertEquals(AnalyzeScope.Packages(listOf("")), discovery.descriptor.scope)
+            assertTrue(discovery.descriptor.scope.includes(""))
+            assertTrue(discovery.descriptor.scope.includes("com.example"))
+        }
+    }
+
     fun testParsesAnnotationExclusivityRuleWithStringArguments() {
         val rule = parseSingleRule(
             """

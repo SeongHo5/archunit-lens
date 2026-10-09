@@ -282,6 +282,74 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         assertTrue(service.rulesForPackage("com.other.controller").isEmpty())
     }
 
+    fun testAnalyzeClassesScopesPreservePackageLookupBoundaries() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        val service = project.service<ArchRuleProjectService>()
+        val ruleFile = addArchitectureRules("ArchitectureRules.java", testData("archrules/analyzeScopeLiteral.java"))
+        val document = PsiDocumentManager.getInstance(project).getDocument(ruleFile) ?: error("Expected rule document")
+        val cases = mapOf(
+            "analyzeScopeLiteral" to "com.allowed",
+            "analyzeScopeConstant" to "com.allowed",
+            "analyzeScopeBare" to "com.rules",
+            "analyzeScopeEmpty" to "com.rules",
+            "analyzeScopePackagesOf" to "com.allowed.domain",
+        )
+        cases.forEach { (fixture, packageName) ->
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(testData("archrules/$fixture.java"))
+                PsiDocumentManager.getInstance(project).commitDocument(document)
+            }
+            assertEquals(fixture, 1, service.rulesForPackage(packageName).size)
+            assertEquals(fixture, 1, service.rulesForPackage("$packageName.child").size)
+            assertTrue(fixture, service.rulesForPackage("${packageName}Other").isEmpty())
+            assertTrue(fixture, service.rulesForPackage("com.outside").isEmpty())
+        }
+    }
+
+    fun testAnalyzeClassesUnknownScopeRetainsDiscoveryWithoutPackageWarnings() {
+        addArchitectureRules("ArchitectureRules.java", testData("archrules/analyzeScopeUnknownPackages.java"))
+        val service = project.service<ArchRuleProjectService>()
+        val discovery = service.discoveries().single()
+        assertNull(discovery.liveRule)
+        assertEquals(AnalyzeScope.Unknown, discovery.descriptor.scope)
+        assertTrue(service.rulesForPackage("com.allowed").isEmpty())
+        assertTrue(service.rulesForPackage("com.outside").isEmpty())
+        assertTrue(service.discoveriesForPackage("com.allowed").isEmpty())
+    }
+
+    fun testAnalyzeClassesExternalConstantEditInvalidatesRuleAndPackageCaches() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        val constants = myFixture.addFileToProject("com/rules/ScopeConstants.java", testData("archrules/analyzeScopeConstants.java"))
+        addArchitectureRules("ArchitectureRules.java", testData("archrules/analyzeScopeExternalConstant.java"))
+        val service = project.service<ArchRuleProjectService>()
+        assertEquals(1, service.rulesForPackage("com.allowed").size)
+        assertTrue(service.rulesForPackage("com.changed").isEmpty())
+        val document = PsiDocumentManager.getInstance(project).getDocument(constants) ?: error("Expected constants document")
+        WriteCommandAction.runWriteCommandAction(project) {
+            document.setText(testData("archrules/analyzeScopeConstants.java").replace("com.allowed", "com.changed"))
+            PsiDocumentManager.getInstance(project).commitDocument(document)
+        }
+        assertTrue(service.rulesForPackage("com.allowed").isEmpty())
+        assertEquals(1, service.rulesForPackage("com.changed").size)
+        assertEquals(1, service.scanMetrics().parsedRuleCandidateFiles)
+    }
+
+    fun testAnalyzeClassesPackageRootEditInvalidatesProvenScope() {
+        val anchor = myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        addArchitectureRules("ArchitectureRules.java", testData("archrules/analyzeScopePackagesOf.java"))
+        val service = project.service<ArchRuleProjectService>()
+        assertEquals(1, service.rulesForPackage("com.allowed.domain").size)
+        val document = PsiDocumentManager.getInstance(project).getDocument(anchor) ?: error("Expected anchor document")
+        WriteCommandAction.runWriteCommandAction(project) {
+            document.setText(testData("archrules/analyzeScopeAnchor.java").replace("com.allowed.domain", "com.changed"))
+            PsiDocumentManager.getInstance(project).commitDocument(document)
+        }
+        assertTrue(service.rulesForPackage("com.allowed.domain").isEmpty())
+        assertNull(service.discoveries().single().liveRule)
+        assertEquals(AnalyzeScope.Unknown, service.discoveries().single().descriptor.scope)
+    }
+
     fun testDiscoveriesForPackageRetainsUnsupportedMetadataByAnalyzeScope() {
         addArchitectureRules(
             "ArchitectureRules.java",

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Preserved `@AnalyzeClasses` package scopes for Java constants, mixed arrays, resolved `packagesOf`, and default test-class packages. Unresolved/custom import scopes remain metadata-only instead of producing global or partial warnings; external constant edits refresh scope caches.
 - Required uniquely resolved ArchUnit entry-point ownership before enabling live rules, keeping same-name project helpers and unresolved or ambiguous roots metadata-only.
 - Excluded inlined primitive/String constant field reads from exact access warnings while preserving nonconstant reads and explicit writes.
 
