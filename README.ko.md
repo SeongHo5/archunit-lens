@@ -56,7 +56,7 @@ Live rule은 진입점 static method의 선언 소유자가 `com.tngtech.archuni
 - 모든 leaf가 정적으로 지원될 때 left-associative class predicate `and()` / `or()`와 독립적인 `andShould()` condition
 - `beAssignableTo(...)` 대상이 resolve되는 QueryMapper 형태 interface rule
 - direct annotation과 전이적으로 합성된 annotation을 포함한 literal class/method meta-annotation rule
-- exact `noClasses()` field, signature-aware method, constructor access. method/constructor signature는 primitive, array, erasure된 vararg type을 포함한 순서 있는 literal parameter class FQN으로 비교하며, 모든 sibling이 지원될 때만 left-associative `andShould()` / `orShould()`를 live 평가합니다.
+- exact `noClasses()` field, signature-aware method, constructor access. 컴파일 시 인라인되는 상수 필드 읽기는 제외하며, 비상수 읽기와 명시적인 쓰기는 계속 검출합니다. method/constructor signature는 primitive, array, erasure된 vararg type을 포함한 순서 있는 literal parameter class FQN으로 비교하며, 모든 sibling이 지원될 때만 left-associative `andShould()` / `orShould()`를 live 평가합니다.
 - positive method/constructor declaration convention과 annotation, 이름, convenience modifier, 지원되는 declaring-class fact를 사용하는 정적으로 판정 가능한 `noFields()`/`noMethods()` 규칙
 - `@AnalyzeClasses(packages = ...)` scope와 `.because("...")` reason 표시
 

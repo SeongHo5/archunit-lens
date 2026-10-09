@@ -9,6 +9,8 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.JavaResolveResult
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiField
+import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiMethod
@@ -1359,6 +1361,53 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         val warnings = warningHighlights()
         assertEquals(warnings.mapNotNull { it.description }.toString(), 2, warnings.size)
         assertEquals(listOf("out", "printStackTrace"), warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) })
+    }
+
+    fun testExactFieldAccessSkipsInlinedPrimitiveAndStringReads() {
+        addConstantFieldAccessFixture()
+        configureJavaFixture("ConstantReads.java", "codeaccess/constantFields/ConstantReads.java")
+
+        val constantNames = setOf("BOOLEAN", "BYTE", "SHORT", "CHAR", "INT", "LONG", "FLOAT", "DOUBLE", "TEXT", "EXPRESSION", "INSTANCE")
+        val references = PsiTreeUtil.findChildrenOfType(myFixture.file, PsiReferenceExpression::class.java)
+            .filter { it.referenceName in constantNames }
+        assertEquals(16, references.size)
+        assertTrue(references.all { it.resolve() is PsiField })
+        assertEquals(
+            List(16) { null },
+            references.map(ExactCodeAccessEvaluator::resolveFieldAccess),
+        )
+        assertTrue(warningHighlights().isEmpty())
+    }
+
+    fun testExactFieldAccessPreservesNonconstantReads() {
+        addConstantFieldAccessFixture()
+        configureJavaFixture("RealReads.java", "codeaccess/constantFields/RealReads.java")
+
+        val warnings = warningHighlights()
+        assertEquals(
+            listOf("RUNTIME", "RUNTIME_TEXT", "OBJECT", "MUTABLE", "INITIALIZED", "instanceInitialized", "RUNTIME", "MUTABLE"),
+            warnings.map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+    }
+
+    fun testExactFieldAccessPreservesSimpleCompoundAndIncrementWrites() {
+        addConstantFieldAccessFixture()
+        configureJavaFixture("FieldWrites.java", "codeaccess/constantFields/FieldWrites.java")
+
+        assertEquals(
+            listOf("MUTABLE", "MUTABLE", "MUTABLE"),
+            warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
+    }
+
+    fun testExactFieldAccessPreservesBlankFinalInitializationWrites() {
+        val constants = addConstantFieldAccessFixture()
+        myFixture.configureFromExistingVirtualFile(constants.virtualFile)
+
+        assertEquals(
+            listOf("INITIALIZED", "instanceInitialized"),
+            warningHighlights().map { myFixture.file.text.substring(it.startOffset, it.endOffset) },
+        )
     }
 
     fun testExactCodeAccessErasesGenericReceiverTypeParameters() {
@@ -2867,6 +2916,16 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
                 }
             """.trimIndent(),
         )
+    }
+
+    private fun addConstantFieldAccessFixture(): PsiFile {
+        addCodeAccessJdkStubs()
+        val constants = myFixture.addFileToProject(
+            "src/main/java/com/example/constants/Constants.java",
+            testData("codeaccess/constantFields/Constants.java"),
+        )
+        addArchitectureRulesFixture("constantFieldAccess")
+        return constants
     }
 
     private fun addArchitectureRulesFixture(name: String) {
