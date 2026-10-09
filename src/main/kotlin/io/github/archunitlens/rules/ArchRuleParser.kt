@@ -65,6 +65,17 @@ object ArchRuleParser {
         val callsWithSource = RawCallExtractor.callsWithSource(source.initializer)
         val calls = callsWithSource.map { it.first }
         if (calls.isEmpty()) return null
+        if (source.analyzeScope == AnalyzeScope.Unknown) {
+            return DiscoveredArchRule(
+                ruleName = source.ruleName,
+                descriptor = unsupportedDescriptor(
+                    source,
+                    calls,
+                    UnsupportedReason.UnsupportedArgument("AnalyzeClasses", 0, "unresolved or unsupported import scope"),
+                ),
+                liveRule = null,
+            )
+        }
 
         return RuleNormalizer.normalize(source, calls, callsWithSource)
     }

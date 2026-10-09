@@ -16,6 +16,12 @@ accesses are also supported. Class predicate <code>and()</code>/<code>or()</code
 code-access <code>andShould()</code>/<code>orShould()</code> are live only when every leaf is exact, statically supported, and resolved.
 </p>
 <p>
+Package scope combines literal/Java constant <code>@AnalyzeClasses(packages = ...)</code> and resolved
+<code>packagesOf</code> class literals. A bare annotation or empty arrays use the annotated class package.
+Unresolved scope entries, nonempty location providers/import options/individual classes, and whole-classpath imports
+keep the whole rule metadata-only; project providers and options are never executed.
+</p>
+<p>
 Unsupported, custom, or ambiguous helper-based rules are retained as Rule Overview metadata when possible
 but do not produce warnings. Unsupported field/method/constructor declarations, non-literal method/constructor access schemas,
 access predicates, method references, and unsupported siblings remain metadata-only. Open the ArchUnit Lens tool window to review supported and unsupported

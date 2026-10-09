@@ -4,10 +4,12 @@ import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.codeInspection.InspectionManager
 import com.intellij.codeInspection.ProblemsHolder
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.psi.JavaElementVisitor
 import com.intellij.psi.JavaResolveResult
+import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiJavaCodeReferenceElement
 import com.intellij.psi.PsiJavaFile
@@ -582,6 +584,60 @@ class ArchUnitLensInspectionTest : BasePlatformTestCase() {
         )
 
         assertTrue(warningDescriptions().isEmpty())
+    }
+
+    fun testAnalyzeClassesResolvedScopesWarnOnlyInsideImportedPackages() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        val cases = mapOf(
+            "analyzeScopeLiteral" to listOf("com.allowed"),
+            "analyzeScopeConstant" to listOf("com.allowed"),
+            "analyzeScopeMixedConstants" to listOf("com.literal", "com.allowed", "com.concatenated"),
+            "analyzeScopeBare" to listOf("com.rules"),
+            "analyzeScopeEmpty" to listOf("com.rules"),
+            "analyzeScopePackagesOf" to listOf("com.allowed.domain"),
+            "analyzeScopeCombinedPackages" to listOf("com.literal", "com.allowed.domain", "com.rules"),
+        )
+        val ruleFile = myFixture.addFileToProject("com/rules/ArchitectureRules.java", testData("archrules/analyzeScopeLiteral.java"))
+        val document = PsiDocumentManager.getInstance(project).getDocument(ruleFile) ?: error("Expected rule document")
+        cases.forEach { (fixture, packages) ->
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(testData("archrules/$fixture.java"))
+                PsiDocumentManager.getInstance(project).commitDocument(document)
+            }
+            packages.forEach { packageName ->
+                listOf(packageName, "$packageName.child").forEach {
+                    myFixture.configureByText("Target.java", testData("archrules/analyzeScopeTarget.java").replace("com.scopeTarget", it))
+                    assertEquals("$fixture in $it", 1, warningDescriptions().size)
+                }
+                myFixture.configureByText("Target.java", testData("archrules/analyzeScopeTarget.java").replace("com.scopeTarget", "${packageName}Other"))
+                assertTrue(fixture, warningDescriptions().isEmpty())
+            }
+            myFixture.configureByText("Target.java", testData("archrules/analyzeScopeTarget.java").replace("com.scopeTarget", "com.outside"))
+            assertTrue(fixture, warningDescriptions().isEmpty())
+        }
+    }
+
+    fun testAnalyzeClassesUnknownAndCustomScopesNeverProducePartialWarnings() {
+        myFixture.addFileToProject("java/lang/String.java", testData("archrules/analyzeScopeString.java"))
+        myFixture.addFileToProject("com/allowed/domain/ScopeAnchor.java", testData("archrules/analyzeScopeAnchor.java"))
+        val ruleFile = myFixture.addFileToProject("com/rules/ArchitectureRules.java", testData("archrules/analyzeScopeUnknownPackages.java"))
+        val document = PsiDocumentManager.getInstance(project).getDocument(ruleFile) ?: error("Expected rule document")
+        listOf(
+            "analyzeScopeUnknownPackages", "analyzeScopeMissingPackage", "analyzeScopeMutablePackage", "analyzeScopeDynamicPackage", "analyzeScopeUnknownPackagesOf",
+            "analyzeScopePrimitivePackagesOf", "analyzeScopeLocations", "analyzeScopeImportOptions",
+            "analyzeScopeWholeClasspath", "analyzeScopeUnknownWholeClasspath", "analyzeScopeClasses",
+        ).forEach { fixture ->
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.setText(testData("archrules/$fixture.java"))
+                PsiDocumentManager.getInstance(project).commitDocument(document)
+            }
+            listOf("com.allowed", "com.rules", "com.outside").forEach { packageName ->
+                myFixture.configureByText("Target.java", testData("archrules/analyzeScopeTarget.java").replace("com.scopeTarget", packageName))
+                assertTrue("$fixture in $packageName", warningDescriptions().isEmpty())
+            }
+            assertNull(fixture, project.service<ArchRuleProjectService>().discoveries().single().liveRule)
+        }
     }
 
     fun testAnnotationExclusivityHighlightsForbiddenAnnotationWithBecauseReason() {

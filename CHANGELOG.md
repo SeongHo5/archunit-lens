@@ -1,5 +1,11 @@
 # ArchUnit Lens Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Preserved `@AnalyzeClasses` package scopes for Java constants, mixed arrays, resolved `packagesOf`, and default test-class packages. Unresolved/custom import scopes remain metadata-only instead of producing global or partial warnings; external constant edits refresh scope caches.
+
 ## [0.3.1] - 2026-09-29
 
 Patch release focused on accurate package-rule feedback, fresh rule discoveries, and safe rename previews.

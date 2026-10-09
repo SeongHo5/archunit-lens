@@ -56,7 +56,9 @@ The initial live-warning subset includes:
 - literal class and method meta-annotation rules, including direct and transitively composed annotations
 - exact `noClasses()` field, signature-aware method, and constructor accesses. Method and constructor signatures use ordered literal parameter class FQNs, including primitive, array, and erased vararg types; bounded left-associative `andShould()` / `orShould()` is live only when every sibling is supported
 - positive method/constructor declaration conventions plus statically decidable `noFields()`/`noMethods()` rules for annotations, names, convenience modifiers, and supported declaring-class facts
-- `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
+- `@AnalyzeClasses` package scopes from literal/Java constant `packages` and resolved `packagesOf` class literals, including the annotated class package when both are empty, plus `.because("...")` reason text
+
+An unresolved scope value makes the whole rule metadata-only; mixed arrays never drop unknown entries. Nonempty `locations`, `importOptions`, or `classes`, and `wholeClasspath = true` are also metadata-only because their exact imported classes are outside the static package-scope subset. Location providers and import options are never executed. Without `@AnalyzeClasses`, the existing all-package scope remains available.
 
 ## Rule Overview
 
