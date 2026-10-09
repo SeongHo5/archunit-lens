@@ -107,6 +107,7 @@ class ArchRuleProjectServiceTest : BasePlatformTestCase() {
         "src/test/java/com/tngtech/archunit/junit/ArchIgnore.java",
         testData("archIgnore/ArchIgnore.java"),
     )
+
     fun testDiscoveriesRequireReadAccess() {
         val service = project.service<ArchRuleProjectService>()
         val executor = Executors.newSingleThreadExecutor()
