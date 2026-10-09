@@ -44,6 +44,8 @@ static final ArchRule mapperAnnotationMustBeExclusive =
 
 ArchUnit Lens supports only statically provable Java rule-field patterns. Unsupported or ambiguous DSL chains are retained as Rule Overview metadata when possible and never produce live warnings. The canonical support reference is [`docs/rule-support-matrix.md`](docs/rule-support-matrix.md).
 
+Live rules require a uniquely resolved static entry-point declaration owned by `com.tngtech.archunit.lang.syntax.ArchRuleDefinition`. Qualified calls and explicit or wildcard static imports are supported when resolution proves that owner. Same-name project helpers and unresolved or ambiguous roots stay metadata-only; helper bodies are never interpreted.
+
 The initial live-warning subset includes:
 
 - package dependency bans for `resideInAPackage(...)` / `resideInAnyPackage(...)`, explicit imports, and resolved Java references
@@ -54,9 +56,11 @@ The initial live-warning subset includes:
 - left-associative class predicate `and()` / `or()` and independent `andShould()` conditions when every leaf is statically supported
 - QueryMapper-style interface rules with resolvable `beAssignableTo(...)`
 - literal class and method meta-annotation rules, including direct and transitively composed annotations retained in class files (CLASS/RUNTIME or default CLASS; SOURCE edges are excluded)
-- exact `noClasses()` field, signature-aware method, and constructor accesses. Method and constructor signatures use ordered literal parameter class FQNs, including primitive, array, and erased vararg types; bounded left-associative `andShould()` / `orShould()` is live only when every sibling is supported
+- exact `noClasses()` field, signature-aware method, and constructor accesses. Inlined compile-time constant field reads are ignored; nonconstant reads and explicit writes remain detectable. Method and constructor signatures use ordered literal parameter class FQNs, including primitive, array, and erased vararg types. Source non-static member constructors include the enclosing-instance type as the first parameter. Compiled inner signatures that cannot be proven produce no warning. Bounded left-associative `andShould()` / `orShould()` is live only when every sibling is supported
 - positive method/constructor declaration conventions plus statically decidable `noFields()`/`noMethods()` rules for annotations, names, convenience modifiers, and supported declaring-class facts
-- `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
+- `@AnalyzeClasses` package scopes from literal/Java constant `packages` and resolved `packagesOf` class literals, including the annotated class package when both are empty, plus `.because("...")` reason text
+
+An unresolved scope value makes the whole rule metadata-only; mixed arrays never drop unknown entries. Nonempty `locations`, `importOptions`, or `classes`, and `wholeClasspath = true` are also metadata-only because their exact imported classes are outside the static package-scope subset. Location providers and import options are never executed. Without `@AnalyzeClasses`, the existing all-package scope remains available.
 
 ## Rule Overview
 

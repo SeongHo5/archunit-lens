@@ -3,6 +3,10 @@
 <p>
 Reports violations for the conservative ArchUnit rule subset that ArchUnit Lens can statically interpret.
 ArchUnit tests remain the final authority; this inspection is early editor feedback only.
+Live rules require a uniquely resolved static entry-point declaration owned by
+<code>com.tngtech.archunit.lang.syntax.ArchRuleDefinition</code>. Qualified calls and explicit or wildcard
+static imports are supported when their owner resolves. Same-name project helpers and unresolved or ambiguous
+roots remain metadata-only; helper bodies are never interpreted.
 </p>
 <p>
 The canonical support contract lives in <code>docs/rule-support-matrix.md</code>. Current live-warning
@@ -12,12 +16,20 @@ literal class/method meta-annotation rules, and positive method/constructor decl
 static methods, and resolved exact raw return types, plus statically decidable negative
 <code>noFields()</code>/<code>noMethods()</code> annotation, name, modifier, and declaring-class rules. Negative polarity is applied once
 to the complete supported condition tree. Exact <code>noClasses()</code> field accesses, signature-aware method calls, and constructor
-accesses are also supported. Class predicate <code>and()</code>/<code>or()</code>, condition <code>andShould()</code>, and left-associative
+accesses are also supported. Inlined primitive/String constant reads are excluded; nonconstant reads and explicit writes remain detectable.
+Declaration initializer writes are not synthesized from PSI. Source non-static member constructors include the immediately enclosing class type as the first JVM parameter.
+Compiled inner constructor signatures that cannot be proven produce no warning. Class predicate <code>and()</code>/<code>or()</code>, condition <code>andShould()</code>, and left-associative
 code-access <code>andShould()</code>/<code>orShould()</code> are live only when every leaf is exact, statically supported, and resolved.
 </p>
 <p>
 Meta-annotation facts follow CLASS/RUNTIME retention (default CLASS) at every annotation edge.
 SOURCE-retained paths cannot produce a meta-annotation match or an annotation removal fix; unresolved retention values produce no warning.
+</p>
+<p>
+Package scope combines literal/Java constant <code>@AnalyzeClasses(packages = ...)</code> and resolved
+<code>packagesOf</code> class literals. A bare annotation or empty arrays use the annotated class package.
+Unresolved scope entries, nonempty location providers/import options/individual classes, and whole-classpath imports
+keep the whole rule metadata-only; project providers and options are never executed.
 </p>
 <p>
 Unsupported, custom, or ambiguous helper-based rules are retained as Rule Overview metadata when possible
