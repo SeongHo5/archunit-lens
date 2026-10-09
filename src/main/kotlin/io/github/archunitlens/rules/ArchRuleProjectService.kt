@@ -11,6 +11,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.roots.ProjectRootModificationTracker
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiClassObjectAccessExpression
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiLiteralExpression
@@ -370,6 +371,13 @@ private const val ARCH_TEST_WORD = "ArchTest"
 private const val NANOS_PER_MILLISECOND = 1_000_000
 
 private fun PsiJavaFile.requiresTypeResolution(): Boolean {
+    if (
+        PsiTreeUtil.findChildrenOfType(this, PsiAnnotation::class.java).any {
+            it.nameReferenceElement?.referenceName == "ArchIgnore"
+        }
+    ) {
+        return true
+    }
     if (PsiTreeUtil.findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null) return true
     val methodCalls = PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
     if (

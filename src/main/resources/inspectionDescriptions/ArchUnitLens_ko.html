@@ -14,6 +14,8 @@ exact <code>noClasses()</code> field access, signature-aware method call, constr
 <code>and()</code>/<code>or()</code>, condition <code>andShould()</code>, code-access의 left-associative <code>andShould()</code>/<code>orShould()</code>를 live warning으로 평가합니다.
 </p>
 <p>
+필드 또는 해당 필드를 직접 선언한 test class에 실제 <code>com.tngtech.archunit.junit.ArchIgnore</code>가 있으면 rule을 discovery, live warning, Rule Overview에서 제외합니다.
+무시된 outer의 독립 nested test class에는 이를 전파하지 않습니다. <code>ArchTests.in(...)</code> 실행 경로와 상속 rule의 ignore 전파는 지원 범위 밖입니다.
 지원하지 않거나 custom/helper 기반이거나 의미가 불확실한 rule은 가능한 경우 Rule Overview metadata로
 보존하지만 warning은 만들지 않습니다. 지원하지 않는 field/method/constructor declaration, literal schema가 아닌 method/constructor access,
 access predicate, method reference, unsupported sibling은 metadata-only로 유지합니다. 지원/미지원 rule, scope, reason, unsupported reason,

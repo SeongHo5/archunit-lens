@@ -27,7 +27,7 @@ object ArchRuleSourceFinder {
     }
 
     fun findInFile(file: PsiFile): List<ArchRuleSource> = PsiTreeUtil.findChildrenOfType(file, PsiField::class.java)
-        .filter { it.hasArchTestAnnotation() && it.isStaticFinal() && it.isArchRuleField() }
+        .filter { it.hasArchTestAnnotation() && it.isStaticFinal() && it.isArchRuleField() && !it.isArchIgnored() }
         .mapNotNull { field ->
             val initializer = field.initializer ?: return@mapNotNull null
             ArchRuleSource(
@@ -37,6 +37,16 @@ object ArchRuleSourceFinder {
                 analyzeScope = field.containingClass?.analyzeScope() ?: AnalyzeScope.All,
             )
         }
+
+    private fun PsiField.isArchIgnored(): Boolean = modifierList?.annotations?.any { it.isArchIgnoreAnnotation() } == true ||
+        containingClass?.modifierList?.annotations?.any { it.isArchIgnoreAnnotation() } == true
+
+    private fun PsiAnnotation.isArchIgnoreAnnotation(): Boolean {
+        val reference = nameReferenceElement ?: return false
+        if (reference.referenceName != "ArchIgnore") return false
+        val annotationClass = reference.resolve() as? PsiClass ?: return false
+        return annotationClass.isAnnotationType && annotationClass.qualifiedName == ARCH_IGNORE_FQN
+    }
 
     private fun PsiField.hasArchTestAnnotation(): Boolean = modifierList?.annotations?.any { it.isArchTestAnnotation() } == true
 
@@ -88,6 +98,7 @@ object ArchRuleSourceFinder {
         else -> emptyList()
     }
 
+    private const val ARCH_IGNORE_FQN = "com.tngtech.archunit.junit.ArchIgnore"
     private const val ARCH_TEST_FQN = "com.tngtech.archunit.junit.ArchTest"
     private const val ARCH_RULE_FQN = "com.tngtech.archunit.lang.ArchRule"
     private const val ANALYZE_CLASSES_FQN = "com.tngtech.archunit.junit.AnalyzeClasses"

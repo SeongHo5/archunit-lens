@@ -57,6 +57,7 @@ ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live wa
 - exact `noClasses()` field, signature-aware method, constructor access. method/constructor signature는 primitive, array, erasure된 vararg type을 포함한 순서 있는 literal parameter class FQN으로 비교하며, 모든 sibling이 지원될 때만 left-associative `andShould()` / `orShould()`를 live 평가합니다.
 - positive method/constructor declaration convention과 annotation, 이름, convenience modifier, 지원되는 declaring-class fact를 사용하는 정적으로 판정 가능한 `noFields()`/`noMethods()` 규칙
 - `@AnalyzeClasses(packages = ...)` scope와 `.because("...")` reason 표시
+- rule field 또는 해당 field를 선언한 test class의 실제 ArchUnit `@ArchIgnore`는 해당 rule을 live warning과 Rule Overview에서 제외합니다. 이름만 같은 다른 annotation은 rule을 비활성화하지 않으며, annotation을 제거하면 PSI 갱신 후 다시 발견합니다.
 
 ## Rule Overview
 

@@ -1,5 +1,11 @@
 # ArchUnit Lens Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Excluded rules disabled by ArchUnit `@ArchIgnore` on fields or declaring test classes from live warnings and Rule Overview, refreshing cached discovery after ignore edits and annotation resolution changes.
+
 ## [0.3.1] - 2026-09-29
 
 Patch release focused on accurate package-rule feedback, fresh rule discoveries, and safe rename previews.

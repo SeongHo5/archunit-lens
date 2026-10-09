@@ -57,6 +57,7 @@ The initial live-warning subset includes:
 - exact `noClasses()` field, signature-aware method, and constructor accesses. Method and constructor signatures use ordered literal parameter class FQNs, including primitive, array, and erased vararg types; bounded left-associative `andShould()` / `orShould()` is live only when every sibling is supported
 - positive method/constructor declaration conventions plus statically decidable `noFields()`/`noMethods()` rules for annotations, names, convenience modifiers, and supported declaring-class facts
 - `@AnalyzeClasses(packages = ...)` scope and `.because("...")` reason text
+- Real ArchUnit `@ArchIgnore` on a rule field or its declaring test class excludes the rule from live warnings and Rule Overview. An unrelated annotation with the same name does not disable a rule. Removing the annotation restores discovery after PSI refresh.
 
 ## Rule Overview
 

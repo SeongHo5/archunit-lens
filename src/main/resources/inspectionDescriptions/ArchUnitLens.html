@@ -3,6 +3,9 @@
 <p>
 Reports violations for the conservative ArchUnit rule subset that ArchUnit Lens can statically interpret.
 ArchUnit tests remain the final authority; this inspection is early editor feedback only.
+Rules with the resolved ArchUnit <code>@ArchIgnore</code> annotation on their field or declaring test class
+are excluded from live warnings and Rule Overview. Removing the annotation restores discovery after PSI refresh;
+unrelated annotations with the same name do not disable rules.
 </p>
 <p>
 The canonical support contract lives in <code>docs/rule-support-matrix.md</code>. Current live-warning
