@@ -31,6 +31,7 @@ import io.github.archunitlens.rules.NoClassesCodeAccessRule
 import io.github.archunitlens.rules.PackageDependencyBanRule
 import io.github.archunitlens.rules.SupportStatus
 import io.github.archunitlens.rules.UnsupportedReason
+import io.github.archunitlens.rules.addArchUnitEntryPointDeclarations
 import io.github.archunitlens.rules.evaluator.ExactCodeAccessEvaluator
 import io.github.archunitlens.rules.evaluator.MemberSubjectEvaluator
 import io.github.archunitlens.settings.ArchUnitLensSettings
@@ -39,6 +40,7 @@ import java.nio.file.Path
 class ArchUnitLensInspectionTest : BasePlatformTestCase() {
     override fun setUp() {
         super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
         myFixture.enableInspections(ArchUnitLensInspection())
     }
 

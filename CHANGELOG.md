@@ -1,5 +1,11 @@
 # ArchUnit Lens Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Required uniquely resolved ArchUnit entry-point ownership before enabling live rules, keeping same-name project helpers and unresolved or ambiguous roots metadata-only.
+
 ## [0.3.1] - 2026-09-29
 
 Patch release focused on accurate package-rule feedback, fresh rule discoveries, and safe rename previews.

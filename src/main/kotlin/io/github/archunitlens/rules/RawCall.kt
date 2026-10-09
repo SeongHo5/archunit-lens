@@ -7,7 +7,9 @@ import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiExpression
 import com.intellij.psi.PsiLambdaExpression
 import com.intellij.psi.PsiLiteralExpression
+import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiMethodCallExpression
+import com.intellij.psi.PsiModifier
 import com.intellij.psi.PsiNewExpression
 import com.intellij.psi.PsiParenthesizedExpression
 import com.intellij.psi.PsiPrimitiveType
@@ -69,6 +71,14 @@ sealed interface RawArgument {
  */
 object RawCallExtractor {
     fun from(expression: PsiExpression): List<RawCall> = callsWithSource(expression).map { it.first }
+
+    internal fun isArchUnitEntryPoint(call: PsiMethodCallExpression): Boolean {
+        val result = call.methodExpression.multiResolve(false).singleOrNull() ?: return false
+        if (!result.isValidResult) return false
+        val method = result.element as? PsiMethod ?: return false
+        return method.hasModifierProperty(PsiModifier.STATIC) &&
+            method.containingClass?.qualifiedName == "com.tngtech.archunit.lang.syntax.ArchRuleDefinition"
+    }
 
     /**
      * Returns extracted calls with their short-lived PSI source for parser-only

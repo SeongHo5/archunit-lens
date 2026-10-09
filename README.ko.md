@@ -44,6 +44,8 @@ static final ArchRule mapperAnnotationMustBeExclusive =
 
 ArchUnit Lens는 정적으로 증명 가능한 Java rule field 패턴만 live warning으로 표시합니다. 지원하지 않거나 의미가 불확실한 DSL chain은 가능한 경우 Rule Overview metadata로만 보존하며 live warning을 만들지 않습니다. canonical 지원 범위는 [`docs/rule-support-matrix.md`](docs/rule-support-matrix.md)입니다.
 
+Live rule은 진입점 static method의 선언 소유자가 `com.tngtech.archunit.lang.syntax.ArchRuleDefinition`으로 유일하게 resolve될 때만 활성화됩니다. qualified call과 명시적·wildcard static import는 소유권이 확인되는 경우 지원합니다. 이름이 같은 프로젝트 helper, 미해결 또는 모호한 root는 metadata-only로 유지하며 helper body를 해석하지 않습니다.
+
 최초 live warning subset은 다음입니다.
 
 - `resideInAPackage(...)` / `resideInAnyPackage(...)`, explicit import, resolved Java reference 기반 package dependency ban

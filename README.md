@@ -44,6 +44,8 @@ static final ArchRule mapperAnnotationMustBeExclusive =
 
 ArchUnit Lens supports only statically provable Java rule-field patterns. Unsupported or ambiguous DSL chains are retained as Rule Overview metadata when possible and never produce live warnings. The canonical support reference is [`docs/rule-support-matrix.md`](docs/rule-support-matrix.md).
 
+Live rules require a uniquely resolved static entry-point declaration owned by `com.tngtech.archunit.lang.syntax.ArchRuleDefinition`. Qualified calls and explicit or wildcard static imports are supported when resolution proves that owner. Same-name project helpers and unresolved or ambiguous roots stay metadata-only; helper bodies are never interpreted.
+
 The initial live-warning subset includes:
 
 - package dependency bans for `resideInAPackage(...)` / `resideInAnyPackage(...)`, explicit imports, and resolved Java references
