@@ -24,9 +24,14 @@ sealed interface AnalyzeScope {
         override fun includes(packageName: String): Boolean = true
     }
 
+    /** Import configuration that cannot safely determine live inspection scope. */
+    data object Unknown : AnalyzeScope {
+        override fun includes(packageName: String): Boolean = false
+    }
+
     data class Packages(val packageNames: List<String>) : AnalyzeScope {
         override fun includes(packageName: String): Boolean = packageNames.any { configured ->
-            packageName == configured || packageName.startsWith("$configured.")
+            configured.isEmpty() || packageName == configured || packageName.startsWith("$configured.")
         }
     }
 }

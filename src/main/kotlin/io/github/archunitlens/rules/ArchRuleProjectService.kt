@@ -11,6 +11,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.roots.ProjectRootModificationTracker
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiClassObjectAccessExpression
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiLiteralExpression
@@ -181,7 +182,7 @@ class ArchRuleProjectService(private val project: Project) {
                 val cacheKey = file.virtualFile?.path ?: file.name
                 val sourceText = file.text
                 val cachedFile = cachedRuleFiles[cacheKey]
-                val resolutionDependent = file.requiresTypeResolution()
+                val resolutionDependent = file.requiresTypeResolution() || ArchRuleSourceFinder.scopeRequiresResolution(file)
                 val canReuseCachedFile = cachedFile?.sourceText == sourceText &&
                     (!resolutionDependent || cachedFile.resolutionStamp == resolutionStamp)
                 var currentRuleSourceCount = cachedFile?.ruleSourceCount ?: 0
@@ -370,8 +371,16 @@ private const val ARCH_TEST_WORD = "ArchTest"
 private const val NANOS_PER_MILLISECOND = 1_000_000
 
 private fun PsiJavaFile.requiresTypeResolution(): Boolean {
+    if (
+        PsiTreeUtil.findChildrenOfType(this, PsiAnnotation::class.java).any {
+            it.nameReferenceElement?.referenceName == "ArchIgnore"
+        }
+    ) {
+        return true
+    }
     if (PsiTreeUtil.findChildOfType(this, PsiClassObjectAccessExpression::class.java) != null) return true
     val methodCalls = PsiTreeUtil.findChildrenOfType(this, PsiMethodCallExpression::class.java)
+    if (methodCalls.any { it.methodExpression.referenceName in ARCHUNIT_SUBJECT_ENTRY_POINTS }) return true
     if (
         methodCalls.any { call ->
             call.methodExpression.referenceName in setOf(

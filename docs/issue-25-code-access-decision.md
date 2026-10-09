@@ -12,7 +12,7 @@ Issues #49 and #50 implement these resolved identities only:
 
 1. `System.out` and `System.err` when a `PsiReferenceExpression.resolve()` result is the exact `java.lang.System` field.
 2. A method call when `PsiMethodCallExpression.resolveMethod()` proves its name and ordered erased declaration parameter types, and the symbolic target owner exactly matches. Primitive, array, and vararg declaration types retain their raw JVM form.
-3. An ordinary `new` or explicit `this`/`super` constructor call when exactly one constructor resolve proves the ordered erased declaration parameter types and symbolic constructed/delegated owner. Anonymous construction is excluded.
+3. An ordinary `new` or explicit `this`/`super` constructor call when exactly one constructor resolve proves the ordered erased parameter types and symbolic constructed/delegated owner. For source non-static member constructors, prepend the immediately enclosing class FQN to match the JVM signature; compiled inner constructors fail closed because PSI does not prove synthetic-parameter representation. Anonymous construction is excluded.
 
 Logger calls that accept a `Throwable` are matched by resolved overload and argument position rather than inferred from a method name. Representative `PageImpl(List)` and `PageImpl(List, Pageable, long)` construction uses the same exact rule.
 

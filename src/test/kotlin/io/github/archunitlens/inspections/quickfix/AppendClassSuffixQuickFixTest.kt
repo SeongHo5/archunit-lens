@@ -12,6 +12,7 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.inspections.ArchUnitLensInspection
+import io.github.archunitlens.rules.addArchUnitEntryPointDeclarations
 import java.nio.file.Path
 
 class AppendClassSuffixQuickFixTest : BasePlatformTestCase() {
@@ -19,6 +20,7 @@ class AppendClassSuffixQuickFixTest : BasePlatformTestCase() {
 
     override fun setUp() {
         super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
         myFixture.enableInspections(ArchUnitLensInspection())
         myFixture.addFileToProject(
             "com/example/ArchitectureRules.java",

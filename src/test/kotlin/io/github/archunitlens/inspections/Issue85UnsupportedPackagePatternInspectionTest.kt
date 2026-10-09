@@ -4,11 +4,13 @@ import com.intellij.openapi.components.service
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.archunitlens.rules.ArchRuleProjectService
 import io.github.archunitlens.rules.SupportStatus
+import io.github.archunitlens.rules.addArchUnitEntryPointDeclarations
 import java.nio.file.Path
 
 class Issue85UnsupportedPackagePatternInspectionTest : BasePlatformTestCase() {
     override fun setUp() {
         super.setUp()
+        myFixture.addArchUnitEntryPointDeclarations()
         myFixture.enableInspections(ArchUnitLensInspection())
     }
 
