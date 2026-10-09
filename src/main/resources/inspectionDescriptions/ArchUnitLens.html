@@ -28,7 +28,7 @@ code-access <code>andShould()</code>/<code>orShould()</code> are live only when 
 </p>
 <p>
 Meta-annotation facts follow CLASS/RUNTIME retention (default CLASS) at every annotation edge.
-SOURCE-retained paths cannot produce a meta-annotation match or an annotation removal fix; unresolved retention values produce no warning.
+SOURCE-retained paths cannot produce a meta-annotation match or an annotation removal fix. Unresolved paths or retention values cannot establish a match, but a known retained sibling path can still establish a match and warning.
 </p>
 <p>
 Package scope combines literal/Java constant <code>@AnalyzeClasses(packages = ...)</code> and resolved

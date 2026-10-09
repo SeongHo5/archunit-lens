@@ -19,7 +19,7 @@ exact <code>noClasses()</code> field access, signature-aware method call, constr
 </p>
 <p>
 meta-annotation fact는 각 annotation 단계에서 CLASS/RUNTIME retention(기본 CLASS)을 따릅니다.
-SOURCE retention 경로는 meta-annotation 일치나 annotation 제거 fix를 만들지 않으며, retention 값이 미해결이면 warning을 만들지 않습니다.
+SOURCE retention 경로는 meta-annotation 일치나 annotation 제거 fix를 만들지 않습니다. 미해결 경로나 retention 값은 일치를 증명하지 못하지만, 별도의 확인된 retained 경로가 일치하면 warning을 만들 수 있습니다.
 </p>
 <p>
 소스의 non-static member constructor는 바로 바깥 클래스 타입을 첫 JVM parameter로 포함합니다. compiled inner constructor의 시그니처를 확정할 수 없으면 warning을 만들지 않습니다.
