@@ -22,6 +22,10 @@ Compiled inner constructor signatures that cannot be proven produce no warning. 
 code-access <code>andShould()</code>/<code>orShould()</code> are live only when every leaf is exact, statically supported, and resolved.
 </p>
 <p>
+Meta-annotation facts follow CLASS/RUNTIME retention (default CLASS) at every annotation edge.
+SOURCE-retained paths cannot produce a meta-annotation match or an annotation removal fix. Unresolved paths or retention values cannot establish a match, but a known retained sibling path can still establish a match and warning.
+</p>
+<p>
 Package scope combines literal/Java constant <code>@AnalyzeClasses(packages = ...)</code> and resolved
 <code>packagesOf</code> class literals. A bare annotation or empty arrays use the annotated class package.
 Unresolved scope entries, nonempty location providers/import options/individual classes, and whole-classpath imports
